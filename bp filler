@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local RS2 = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
@@ -232,6 +233,7 @@ local function collectBlueprints()
     return list
 end
 
+-- ─────────── NEW KRON HUB STYLE UI ───────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "BPFillerStandalone"
 gui.ResetOnSpawn = false
@@ -241,91 +243,99 @@ gui.IgnoreGuiInset = false
 gui.Parent = plr:WaitForChild("PlayerGui")
 _G._BPFillerGui = gui
 
-local camera = workspace.CurrentCamera
-local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+local ACCENT = Color3.fromRGB(120, 80, 255)
+local BG_DARK = Color3.fromRGB(15, 15, 20)
+local BG_ROW = Color3.fromRGB(25, 25, 32)
+local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
+local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 
-local function computePanelSize(vp)
-    if not vp then vp = Vector2.new(1280, 720) end
-    local small = vp.X < 800 or vp.Y < 600
-    if small then
-        return math.clamp(vp.X - 20, 240, 420),
-               math.clamp(vp.Y - 40, 300, 620)
-    end
-    return math.clamp(vp.X * 0.35, 380, 460),
-           math.clamp(vp.Y * 0.75, 420, 640)
-end
+-- Floating Toggle Button
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleBtn"
+toggleBtn.Size = UDim2.fromOffset(50, 50)
+toggleBtn.Position = UDim2.new(1, -70, 0, 20)
+toggleBtn.BackgroundColor3 = BG_DARK
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Text = "⚙"
+toggleBtn.TextColor3 = TEXT_WHITE
+toggleBtn.TextSize = 24
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.ZIndex = 100
+toggleBtn.Parent = gui
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 25)
+local toggleStroke = Instance.new("UIStroke", toggleBtn)
+toggleStroke.Color = ACCENT
+toggleStroke.Thickness = 2
 
-local panelW, panelH = computePanelSize(viewport)
-
+-- Main Panel
+local panelW, panelH = 480, 620
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
 panel.Position = UDim2.new(0.5, -panelW / 2, 0.5, -panelH / 2)
-panel.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+panel.BackgroundColor3 = BG_DARK
 panel.BorderSizePixel = 0
 panel.Active = true
 panel.Draggable = true
 panel.ClipsDescendants = true
+panel.Visible = true
 panel.Parent = gui
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
 local pStroke = Instance.new("UIStroke", panel)
-pStroke.Color = Color3.fromRGB(60, 60, 72)
-pStroke.Thickness = 1
+pStroke.Color = ACCENT
+pStroke.Thickness = 2
 
+-- Title Bar
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 42)
-titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+titleBar.Size = UDim2.new(1, 0, 0, 45)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 titleBar.BorderSizePixel = 0
 titleBar.Parent = panel
 Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 12)
-local tbFix = Instance.new("Frame", titleBar)
-tbFix.Size = UDim2.new(1, 0, 0.5, 0)
-tbFix.Position = UDim2.new(0, 0, 0.5, 0)
-tbFix.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-tbFix.BorderSizePixel = 0
 
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size = UDim2.new(1, -100, 1, 0)
-titleLbl.Position = UDim2.fromOffset(14, 0)
+titleLbl.Size = UDim2.new(1, -120, 1, 0)
+titleLbl.Position = UDim2.fromOffset(15, 0)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Text = "Blueprint Filler"
-titleLbl.TextColor3 = Color3.fromRGB(235, 235, 240)
+titleLbl.TextColor3 = TEXT_WHITE
 titleLbl.Font = Enum.Font.GothamBold
-titleLbl.TextSize = 15
+titleLbl.TextSize = 16
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 titleLbl.Parent = titleBar
 
 local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.fromOffset(26, 26)
-minimizeBtn.Position = UDim2.new(1, -64, 0, 8)
-minimizeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+minimizeBtn.Size = UDim2.fromOffset(30, 30)
+minimizeBtn.Position = UDim2.new(1, -75, 0, 7.5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 minimizeBtn.BorderSizePixel = 0
 minimizeBtn.Text = "—"
-minimizeBtn.TextColor3 = Color3.fromRGB(220, 220, 230)
+minimizeBtn.TextColor3 = TEXT_WHITE
 minimizeBtn.Font = Enum.Font.GothamBold
-minimizeBtn.TextSize = 14
+minimizeBtn.TextSize = 16
 minimizeBtn.Parent = titleBar
 Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 6)
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(26, 26)
-closeBtn.Position = UDim2.new(1, -34, 0, 8)
-closeBtn.BackgroundColor3 = Color3.fromRGB(90, 30, 30)
+closeBtn.Size = UDim2.fromOffset(30, 30)
+closeBtn.Position = UDim2.new(1, -40, 0, 7.5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 closeBtn.BorderSizePixel = 0
 closeBtn.Text = "X"
-closeBtn.TextColor3 = Color3.fromRGB(240, 200, 200)
+closeBtn.TextColor3 = TEXT_WHITE
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 13
+closeBtn.TextSize = 14
 closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
 
+-- Scrolling Body
 local body = Instance.new("ScrollingFrame")
-body.Size = UDim2.new(1, -20, 1, -54)
-body.Position = UDim2.fromOffset(10, 46)
+body.Size = UDim2.new(1, -20, 1, -60)
+body.Position = UDim2.fromOffset(10, 50)
 body.BackgroundTransparency = 1
 body.BorderSizePixel = 0
 body.ScrollBarThickness = 6
-body.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
+body.ScrollBarImageColor3 = ACCENT
 body.CanvasSize = UDim2.new(0, 0, 0, 0)
 body.AutomaticCanvasSize = Enum.AutomaticSize.Y
 body.Parent = panel
@@ -334,18 +344,15 @@ local layout = Instance.new("UIListLayout", body)
 layout.Padding = UDim.new(0, 8)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local overlay = Instance.new("Frame")
-overlay.Name = "DropdownOverlay"
-overlay.Size = UDim2.new(1, 0, 1, 0)
-overlay.BackgroundTransparency = 1
-overlay.ZIndex = 50
-overlay.ClipsDescendants = false
-overlay.Parent = panel
+local padding = Instance.new("UIPadding", body)
+padding.PaddingTop = UDim.new(0, 10)
+padding.PaddingBottom = UDim.new(0, 10)
 
+-- Resize Handle
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(20, 20)
-resizeHandle.Position = UDim2.new(1, -24, 1, -24)
-resizeHandle.BackgroundColor3 = Color3.fromRGB(50, 50, 62)
+resizeHandle.Position = UDim2.new(1, -25, 1, -25)
+resizeHandle.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 resizeHandle.BorderSizePixel = 0
 resizeHandle.Text = ""
 resizeHandle.AutoButtonColor = false
@@ -357,19 +364,20 @@ for i = 1, 3 do
     local line = Instance.new("Frame")
     line.Size = UDim2.fromOffset(10 - i * 2, 1)
     line.Position = UDim2.fromOffset(4, 5 + i * 3)
-    line.BackgroundColor3 = Color3.fromRGB(150, 150, 170)
+    line.BackgroundColor3 = TEXT_GRAY
     line.BorderSizePixel = 0
     line.Parent = resizeHandle
 end
 
+-- ─────────── UI FACTORY HELPERS ───────────
 local ROW_SECTION  = 26
 local ROW_PARA     = 48
-local ROW_BTN      = 40
-local ROW_BTN_DESC = 54
-local ROW_TOGGLE   = 42
-local ROW_TOG_DESC = 54
-local ROW_INPUT    = 40
-local ROW_SLIDER   = 54
+local ROW_BTN      = 42
+local ROW_BTN_DESC = 56
+local ROW_TOGGLE   = 44
+local ROW_TOG_DESC = 56
+local ROW_INPUT    = 42
+local ROW_SLIDER   = 56
 local ROW_DROPDOWN = 48
 
 local function makeSection(text, order)
@@ -377,7 +385,7 @@ local function makeSection(text, order)
     lbl.Size = UDim2.new(1, 0, 0, ROW_SECTION)
     lbl.BackgroundTransparency = 1
     lbl.Text = "  " .. text
-    lbl.TextColor3 = Color3.fromRGB(160, 160, 180)
+    lbl.TextColor3 = ACCENT
     lbl.Font = Enum.Font.GothamBold
     lbl.TextSize = 12
     lbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -389,7 +397,7 @@ end
 local function makeParagraph(title, desc, order, color)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_PARA)
-    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BackgroundColor3 = BG_ROW
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
@@ -400,7 +408,7 @@ local function makeParagraph(title, desc, order, color)
     t.Position = UDim2.fromOffset(8, 5)
     t.BackgroundTransparency = 1
     t.Text = title
-    t.TextColor3 = Color3.fromRGB(220, 220, 230)
+    t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
@@ -411,7 +419,7 @@ local function makeParagraph(title, desc, order, color)
     d.Position = UDim2.fromOffset(8, 22)
     d.BackgroundTransparency = 1
     d.Text = desc
-    d.TextColor3 = color or Color3.fromRGB(150, 150, 165)
+    d.TextColor3 = color or TEXT_GRAY
     d.Font = Enum.Font.Gotham
     d.TextSize = 11
     d.TextXAlignment = Enum.TextXAlignment.Left
@@ -424,7 +432,7 @@ end
 local function makeButton(text, desc, onClick, order)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 0, desc and ROW_BTN_DESC or ROW_BTN)
-    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    btn.BackgroundColor3 = BG_ROW
     btn.BorderSizePixel = 0
     btn.Text = ""
     btn.AutoButtonColor = true
@@ -432,15 +440,15 @@ local function makeButton(text, desc, onClick, order)
     btn.Parent = body
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
     local stroke = Instance.new("UIStroke", btn)
-    stroke.Color = Color3.fromRGB(60, 60, 75)
+    stroke.Color = Color3.fromRGB(50, 50, 65)
     stroke.Thickness = 1
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.new(1, -16, 0, 18)
-    t.Position = UDim2.fromOffset(8, desc and 5 or 10)
+    t.Position = UDim2.fromOffset(8, desc and 5 or 12)
     t.BackgroundTransparency = 1
     t.Text = text
-    t.TextColor3 = Color3.fromRGB(230, 230, 240)
+    t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamBold
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
@@ -452,7 +460,7 @@ local function makeButton(text, desc, onClick, order)
         d.Position = UDim2.fromOffset(8, 24)
         d.BackgroundTransparency = 1
         d.Text = desc
-        d.TextColor3 = Color3.fromRGB(140, 140, 155)
+        d.TextColor3 = TEXT_GRAY
         d.Font = Enum.Font.Gotham
         d.TextSize = 10
         d.TextXAlignment = Enum.TextXAlignment.Left
@@ -470,7 +478,7 @@ end
 local function makeToggle(text, desc, default, onChange, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, desc and ROW_TOG_DESC or ROW_TOGGLE)
-    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BackgroundColor3 = BG_ROW
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
@@ -478,10 +486,10 @@ local function makeToggle(text, desc, default, onChange, order)
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.new(1, -70, 0, 18)
-    t.Position = UDim2.fromOffset(8, desc and 5 or 12)
+    t.Position = UDim2.fromOffset(8, desc and 5 or 13)
     t.BackgroundTransparency = 1
     t.Text = text
-    t.TextColor3 = Color3.fromRGB(220, 220, 230)
+    t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
@@ -493,7 +501,7 @@ local function makeToggle(text, desc, default, onChange, order)
         d.Position = UDim2.fromOffset(8, 24)
         d.BackgroundTransparency = 1
         d.Text = desc
-        d.TextColor3 = Color3.fromRGB(140, 140, 155)
+        d.TextColor3 = TEXT_GRAY
         d.Font = Enum.Font.Gotham
         d.TextSize = 10
         d.TextXAlignment = Enum.TextXAlignment.Left
@@ -505,7 +513,7 @@ local function makeToggle(text, desc, default, onChange, order)
     local switch = Instance.new("TextButton")
     switch.Size = UDim2.fromOffset(48, 26)
     switch.Position = UDim2.new(1, -56, 0.5, -13)
-    switch.BackgroundColor3 = state and Color3.fromRGB(40, 130, 70) or Color3.fromRGB(50, 50, 62)
+    switch.BackgroundColor3 = state and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(45, 45, 55)
     switch.BorderSizePixel = 0
     switch.Text = ""
     switch.Parent = frame
@@ -514,14 +522,14 @@ local function makeToggle(text, desc, default, onChange, order)
     local knob = Instance.new("Frame")
     knob.Size = UDim2.fromOffset(20, 20)
     knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
-    knob.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
+    knob.BackgroundColor3 = TEXT_WHITE
     knob.BorderSizePixel = 0
     knob.Parent = switch
     Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 10)
 
     local function setState(v)
         state = v
-        switch.BackgroundColor3 = state and Color3.fromRGB(40, 130, 70) or Color3.fromRGB(50, 50, 62)
+        switch.BackgroundColor3 = state and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(45, 45, 55)
         knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
     end
 
@@ -536,7 +544,7 @@ end
 local function makeInput(text, default, onChange, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_INPUT)
-    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BackgroundColor3 = BG_ROW
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
@@ -547,27 +555,27 @@ local function makeInput(text, default, onChange, order)
     t.Position = UDim2.fromOffset(8, 0)
     t.BackgroundTransparency = 1
     t.Text = text
-    t.TextColor3 = Color3.fromRGB(200, 200, 215)
-    t.Font = Enum.Font.Gotham
+    t.TextColor3 = TEXT_WHITE
+    t.Font = Enum.Font.GothamMedium
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, -130, 0, 28)
-    box.Position = UDim2.new(0, 118, 0.5, -14)
-    box.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    box.Size = UDim2.new(1, -130, 0, 30)
+    box.Position = UDim2.new(0, 118, 0.5, -15)
+    box.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     box.BorderSizePixel = 0
     box.Text = tostring(default)
-    box.TextColor3 = Color3.fromRGB(255, 255, 255)
-    box.Font = Enum.Font.Gotham
-    box.TextSize = 14
+    box.TextColor3 = TEXT_WHITE
+    box.Font = Enum.Font.GothamMedium
+    box.TextSize = 13
     box.ClearTextOnFocus = false
     box.TextXAlignment = Enum.TextXAlignment.Left
     box.Parent = frame
     Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
     local bs = Instance.new("UIStroke", box)
-    bs.Color = Color3.fromRGB(70, 70, 85)
+    bs.Color = Color3.fromRGB(60, 60, 75)
     bs.Thickness = 1
 
     box.FocusLost:Connect(function()
@@ -580,7 +588,7 @@ end
 local function makeSlider(text, min, max, default, onChange, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_SLIDER)
-    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BackgroundColor3 = BG_ROW
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
@@ -591,7 +599,7 @@ local function makeSlider(text, min, max, default, onChange, order)
     t.Position = UDim2.fromOffset(8, 5)
     t.BackgroundTransparency = 1
     t.Text = text
-    t.TextColor3 = Color3.fromRGB(220, 220, 230)
+    t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
@@ -602,23 +610,23 @@ local function makeSlider(text, min, max, default, onChange, order)
     valLbl.Position = UDim2.new(1, -68, 0, 5)
     valLbl.BackgroundTransparency = 1
     valLbl.Text = tostring(default)
-    valLbl.TextColor3 = Color3.fromRGB(180, 220, 190)
-    valLbl.Font = Enum.Font.Gotham
+    valLbl.TextColor3 = ACCENT
+    valLbl.Font = Enum.Font.GothamBold
     valLbl.TextSize = 12
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
     valLbl.Parent = frame
 
     local track = Instance.new("Frame")
     track.Size = UDim2.new(1, -16, 0, 8)
-    track.Position = UDim2.fromOffset(8, 36)
-    track.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    track.Position = UDim2.fromOffset(8, 38)
+    track.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     track.BorderSizePixel = 0
     track.Parent = frame
     Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+    fill.BackgroundColor3 = ACCENT
     fill.BorderSizePixel = 0
     fill.Parent = track
     Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
@@ -627,7 +635,7 @@ local function makeSlider(text, min, max, default, onChange, order)
     knob.Size = UDim2.fromOffset(18, 18)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
-    knob.BackgroundColor3 = Color3.fromRGB(230, 230, 240)
+    knob.BackgroundColor3 = TEXT_WHITE
     knob.BorderSizePixel = 0
     knob.Parent = track
     Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 9)
@@ -683,7 +691,7 @@ end
 local function makeDropdown(text, values, default, onChange, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_DROPDOWN)
-    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BackgroundColor3 = BG_ROW
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
@@ -694,8 +702,8 @@ local function makeDropdown(text, values, default, onChange, order)
     t.Position = UDim2.fromOffset(8, 0)
     t.BackgroundTransparency = 1
     t.Text = text
-    t.TextColor3 = Color3.fromRGB(200, 200, 215)
-    t.Font = Enum.Font.Gotham
+    t.TextColor3 = TEXT_WHITE
+    t.Font = Enum.Font.GothamMedium
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
@@ -703,7 +711,7 @@ local function makeDropdown(text, values, default, onChange, order)
     local sel = Instance.new("TextButton")
     sel.Size = UDim2.new(1, -130, 0, 32)
     sel.Position = UDim2.new(0, 118, 0.5, -16)
-    sel.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    sel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     sel.BorderSizePixel = 0
     sel.Text = ""
     sel.AutoButtonColor = true
@@ -711,7 +719,7 @@ local function makeDropdown(text, values, default, onChange, order)
     sel.Parent = frame
     Instance.new("UICorner", sel).CornerRadius = UDim.new(0, 6)
     local ss = Instance.new("UIStroke", sel)
-    ss.Color = Color3.fromRGB(70, 70, 85)
+    ss.Color = Color3.fromRGB(60, 60, 75)
     ss.Thickness = 1
 
     local selLbl = Instance.new("TextLabel")
@@ -719,8 +727,8 @@ local function makeDropdown(text, values, default, onChange, order)
     selLbl.Position = UDim2.fromOffset(10, 0)
     selLbl.BackgroundTransparency = 1
     selLbl.Text = tostring(default)
-    selLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-    selLbl.Font = Enum.Font.Gotham
+    selLbl.TextColor3 = TEXT_WHITE
+    selLbl.Font = Enum.Font.GothamMedium
     selLbl.TextSize = 13
     selLbl.TextXAlignment = Enum.TextXAlignment.Left
     selLbl.Parent = sel
@@ -730,7 +738,7 @@ local function makeDropdown(text, values, default, onChange, order)
     arrow.Position = UDim2.new(1, -22, 0, 0)
     arrow.BackgroundTransparency = 1
     arrow.Text = "v"
-    arrow.TextColor3 = Color3.fromRGB(150, 150, 165)
+    arrow.TextColor3 = TEXT_GRAY
     arrow.Font = Enum.Font.GothamBold
     arrow.TextSize = 11
     arrow.Parent = sel
@@ -752,27 +760,23 @@ local function makeDropdown(text, values, default, onChange, order)
         
         listFrame = Instance.new("ScrollingFrame")
         listFrame.Name = "DropdownList"
-        listFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+        listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
         listFrame.BorderSizePixel = 0
-        listFrame.ZIndex = 200
+        listFrame.ZIndex = 1000
         listFrame.ScrollBarThickness = 5
-        listFrame.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
+        listFrame.ScrollBarImageColor3 = ACCENT
         listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
         listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
         listFrame.ClipsDescendants = true
         
         local ap = sel.AbsolutePosition
-        local panelAp = panel.AbsolutePosition
-        local offsetX = ap.X - panelAp.X
-        local offsetY = ap.Y - panelAp.Y + sel.AbsoluteSize.Y + 2
-        
-        listFrame.Position = UDim2.fromOffset(offsetX, offsetY)
+        listFrame.Position = UDim2.fromOffset(ap.X, ap.Y + sel.AbsoluteSize.Y + 2)
         listFrame.Size = UDim2.fromOffset(sel.AbsoluteSize.X, math.min(#currentValues * 28 + 8, 200))
         
-        listFrame.Parent = overlay
+        listFrame.Parent = gui
         Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 6)
         local ls = Instance.new("UIStroke", listFrame)
-        ls.Color = Color3.fromRGB(80, 80, 105)
+        ls.Color = ACCENT
         ls.Thickness = 1
 
         local lLayout = Instance.new("UIListLayout", listFrame)
@@ -783,11 +787,11 @@ local function makeDropdown(text, values, default, onChange, order)
         for _, v in ipairs(currentValues) do
             local item = Instance.new("TextButton")
             item.Size = UDim2.new(1, -8, 0, 24)
-            item.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+            item.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
             item.BorderSizePixel = 0
             item.Text = tostring(v)
-            item.TextColor3 = Color3.fromRGB(220, 220, 230)
-            item.Font = Enum.Font.Gotham
+            item.TextColor3 = TEXT_WHITE
+            item.Font = Enum.Font.GothamMedium
             item.TextSize = 12
             item.Parent = listFrame
             Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
@@ -832,6 +836,7 @@ UIS.InputBegan:Connect(function(input, gp)
     end
 end)
 
+-- ─────────── LOGIC FUNCTIONS ───────────
 local statusPara = nil
 local inventoryPara = nil
 local treeLabelPara = nil
@@ -1108,6 +1113,7 @@ local function updateInventory()
     end
 end
 
+-- ─────────── BUILD THE UI ───────────
 local order = 0
 local function nextOrder() order += 1; return order end
 
@@ -1197,22 +1203,30 @@ makeSection("STATUS", nextOrder())
 
 statusPara = makeParagraph("Status", "Ready - pick a plank to begin", nextOrder())
 
+-- ─────────── TOGGLE / MINIMIZE / CLOSE ───────────
 local minimized = false
 local savedSize = panel.Size
-minimizeBtn.MouseButton1Click:Connect(function()
+
+local function togglePanel()
     minimized = not minimized
     if minimized then
         savedSize = panel.Size
-        panel.Size = UDim2.fromOffset(panel.AbsoluteSize.X, 42)
-        body.Visible = false
-        resizeHandle.Visible = false
-        overlay.Visible = false
+        panel.Visible = false
+        toggleBtn.Text = "⚙"
     else
+        panel.Visible = true
         panel.Size = savedSize
-        body.Visible = true
-        resizeHandle.Visible = true
-        overlay.Visible = true
+        toggleBtn.Text = "⚙"
     end
+end
+
+toggleBtn.MouseButton1Click:Connect(togglePanel)
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = true
+    savedSize = panel.Size
+    panel.Visible = false
+    toggleBtn.Text = "⚙"
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
@@ -1220,6 +1234,7 @@ closeBtn.MouseButton1Click:Connect(function()
     _G._BPFillerGui = nil
 end)
 
+-- ─────────── RESIZE HANDLE ───────────
 local resizing = false
 local resizeStartMouse, resizeStartSize
 
@@ -1239,8 +1254,8 @@ UIS.InputChanged:Connect(function(input)
         local cur = UIS:GetMouseLocation()
         local dx = cur.X - resizeStartMouse.X
         local dy = cur.Y - resizeStartMouse.Y
-        local newW = math.clamp(resizeStartSize.X + dx, 240, 700)
-        local newH = math.clamp(resizeStartSize.Y + dy, 260, 900)
+        local newW = math.clamp(resizeStartSize.X + dx, 300, 700)
+        local newH = math.clamp(resizeStartSize.Y + dy, 300, 900)
         panel.Size = UDim2.fromOffset(newW, newH)
     end
 end)
@@ -1252,10 +1267,11 @@ UIS.InputEnded:Connect(function(input)
     end
 end)
 
+-- ─────────── VIEWPORT CHANGE ───────────
 local function onViewportChange()
     local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
     if not vp then return end
-    local w, h = computePanelSize(vp)
+    local w, h = 480, 620
     local curW = panel.AbsoluteSize.X
     local curH = panel.AbsoluteSize.Y
     if curW > w or curH > h then
@@ -1274,6 +1290,7 @@ if workspace.CurrentCamera then
     workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(onViewportChange)
 end
 
+-- ─────────── PLAYER LIST REFRESH ───────────
 Players.PlayerAdded:Connect(function()
     if playerDropdown then
         pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
@@ -1292,6 +1309,7 @@ Players.PlayerRemoving:Connect(function(p)
     end
 end)
 
+-- ─────────── BACKGROUND LOOPS ───────────
 RunService.Heartbeat:Connect(function(dt)
     if not gui.Parent then return end
     lastScanAccum += dt
@@ -1315,4 +1333,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] Loaded.")
+print("[BPFiller] Loaded. Click the floating gear button to open/close.")
