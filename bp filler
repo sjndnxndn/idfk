@@ -265,6 +265,7 @@ panel.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 panel.BorderSizePixel = 0
 panel.Active = true
 panel.Draggable = true
+panel.ClipsDescendants = true
 panel.Parent = gui
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
 local pStroke = Instance.new("UIStroke", panel)
@@ -333,6 +334,14 @@ local layout = Instance.new("UIListLayout", body)
 layout.Padding = UDim.new(0, 8)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 
+local overlay = Instance.new("Frame")
+overlay.Name = "DropdownOverlay"
+overlay.Size = UDim2.new(1, 0, 1, 0)
+overlay.BackgroundTransparency = 1
+overlay.ZIndex = 50
+overlay.ClipsDescendants = false
+overlay.Parent = panel
+
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(20, 20)
 resizeHandle.Position = UDim2.new(1, -24, 1, -24)
@@ -340,6 +349,7 @@ resizeHandle.BackgroundColor3 = Color3.fromRGB(50, 50, 62)
 resizeHandle.BorderSizePixel = 0
 resizeHandle.Text = ""
 resizeHandle.AutoButtonColor = false
+resizeHandle.ZIndex = 60
 resizeHandle.Parent = panel
 Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 5)
 
@@ -358,9 +368,9 @@ local ROW_BTN      = 40
 local ROW_BTN_DESC = 54
 local ROW_TOGGLE   = 42
 local ROW_TOG_DESC = 54
-local ROW_INPUT    = 36
+local ROW_INPUT    = 40
 local ROW_SLIDER   = 54
-local ROW_DROPDOWN = 44
+local ROW_DROPDOWN = 48
 
 local function makeSection(text, order)
     local lbl = Instance.new("TextLabel")
@@ -546,18 +556,18 @@ local function makeInput(text, default, onChange, order)
     local box = Instance.new("TextBox")
     box.Size = UDim2.new(1, -130, 0, 28)
     box.Position = UDim2.new(0, 118, 0.5, -14)
-    box.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    box.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
     box.BorderSizePixel = 0
     box.Text = tostring(default)
-    box.TextColor3 = Color3.fromRGB(230, 230, 240)
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
     box.Font = Enum.Font.Gotham
-    box.TextSize = 13
+    box.TextSize = 14
     box.ClearTextOnFocus = false
     box.TextXAlignment = Enum.TextXAlignment.Left
     box.Parent = frame
     Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
     local bs = Instance.new("UIStroke", box)
-    bs.Color = Color3.fromRGB(55, 55, 70)
+    bs.Color = Color3.fromRGB(70, 70, 85)
     bs.Thickness = 1
 
     box.FocusLost:Connect(function()
@@ -593,7 +603,7 @@ local function makeSlider(text, min, max, default, onChange, order)
     valLbl.BackgroundTransparency = 1
     valLbl.Text = tostring(default)
     valLbl.TextColor3 = Color3.fromRGB(180, 220, 190)
-    valLbl.Font = Enum.Font.Code
+    valLbl.Font = Enum.Font.Gotham
     valLbl.TextSize = 12
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
     valLbl.Parent = frame
@@ -601,7 +611,7 @@ local function makeSlider(text, min, max, default, onChange, order)
     local track = Instance.new("Frame")
     track.Size = UDim2.new(1, -16, 0, 8)
     track.Position = UDim2.fromOffset(8, 36)
-    track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    track.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
     track.BorderSizePixel = 0
     track.Parent = frame
     Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
@@ -685,15 +695,15 @@ local function makeDropdown(text, values, default, onChange, order)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = Color3.fromRGB(200, 200, 215)
-    t.Font = Enum.Font.GothamMedium
+    t.Font = Enum.Font.Gotham
     t.TextSize = 12
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     local sel = Instance.new("TextButton")
-    sel.Size = UDim2.new(1, -152, 0, 30)
-    sel.Position = UDim2.new(0, 118, 0.5, -15)
-    sel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    sel.Size = UDim2.new(1, -130, 0, 32)
+    sel.Position = UDim2.new(0, 118, 0.5, -16)
+    sel.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
     sel.BorderSizePixel = 0
     sel.Text = ""
     sel.AutoButtonColor = true
@@ -701,22 +711,22 @@ local function makeDropdown(text, values, default, onChange, order)
     sel.Parent = frame
     Instance.new("UICorner", sel).CornerRadius = UDim.new(0, 6)
     local ss = Instance.new("UIStroke", sel)
-    ss.Color = Color3.fromRGB(55, 55, 70)
+    ss.Color = Color3.fromRGB(70, 70, 85)
     ss.Thickness = 1
 
     local selLbl = Instance.new("TextLabel")
     selLbl.Size = UDim2.new(1, -26, 1, 0)
-    selLbl.Position = UDim2.fromOffset(8, 0)
+    selLbl.Position = UDim2.fromOffset(10, 0)
     selLbl.BackgroundTransparency = 1
     selLbl.Text = tostring(default)
-    selLbl.TextColor3 = Color3.fromRGB(230, 230, 240)
+    selLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
     selLbl.Font = Enum.Font.Gotham
-    selLbl.TextSize = 12
+    selLbl.TextSize = 13
     selLbl.TextXAlignment = Enum.TextXAlignment.Left
     selLbl.Parent = sel
 
     local arrow = Instance.new("TextLabel")
-    arrow.Size = UDim2.fromOffset(20, 30)
+    arrow.Size = UDim2.fromOffset(20, 32)
     arrow.Position = UDim2.new(1, -22, 0, 0)
     arrow.BackgroundTransparency = 1
     arrow.Text = "v"
@@ -727,91 +737,86 @@ local function makeDropdown(text, values, default, onChange, order)
 
     local currentValues = values
     local open = false
+    local listFrame = nil
 
-    local listFrame = Instance.new("ScrollingFrame")
-    listFrame.Name = "DropdownList"
-    listFrame.Size = UDim2.fromOffset(220, math.min(#values * 28 + 8, 240))
-    listFrame.Position = UDim2.fromOffset(0, 0)
-    listFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    listFrame.BorderSizePixel = 0
-    listFrame.Visible = false
-    listFrame.ZIndex = 200
-    listFrame.ScrollBarThickness = 5
-    listFrame.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
-    listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    listFrame.Parent = frame -- Parented to the row frame instead of gui
-    Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 6)
-    local ls = Instance.new("UIStroke", listFrame)
-    ls.Color = Color3.fromRGB(80, 80, 105)
-    ls.Thickness = 1
+    local function closeList()
+        if listFrame then
+            listFrame:Destroy()
+            listFrame = nil
+        end
+        open = false
+    end
 
-    local lLayout = Instance.new("UIListLayout", listFrame)
-    lLayout.Padding = UDim.new(0, 2)
-    lLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    lLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    local function openList()
+        closeAllDropdowns()
+        
+        listFrame = Instance.new("ScrollingFrame")
+        listFrame.Name = "DropdownList"
+        listFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+        listFrame.BorderSizePixel = 0
+        listFrame.ZIndex = 200
+        listFrame.ScrollBarThickness = 5
+        listFrame.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
+        listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+        listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        listFrame.ClipsDescendants = true
+        
+        local ap = sel.AbsolutePosition
+        local panelAp = panel.AbsolutePosition
+        local offsetX = ap.X - panelAp.X
+        local offsetY = ap.Y - panelAp.Y + sel.AbsoluteSize.Y + 2
+        
+        listFrame.Position = UDim2.fromOffset(offsetX, offsetY)
+        listFrame.Size = UDim2.fromOffset(sel.AbsoluteSize.X, math.min(#currentValues * 28 + 8, 200))
+        
+        listFrame.Parent = overlay
+        Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 6)
+        local ls = Instance.new("UIStroke", listFrame)
+        ls.Color = Color3.fromRGB(80, 80, 105)
+        ls.Thickness = 1
 
-    local entries = {}
+        local lLayout = Instance.new("UIListLayout", listFrame)
+        lLayout.Padding = UDim.new(0, 2)
+        lLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        lLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-    local function rebuildEntries()
-        for _, e in ipairs(entries) do e:Destroy() end
-        entries = {}
         for _, v in ipairs(currentValues) do
             local item = Instance.new("TextButton")
             item.Size = UDim2.new(1, -8, 0, 24)
-            item.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+            item.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
             item.BorderSizePixel = 0
             item.Text = tostring(v)
             item.TextColor3 = Color3.fromRGB(220, 220, 230)
             item.Font = Enum.Font.Gotham
-            item.TextSize = 11
+            item.TextSize = 12
             item.Parent = listFrame
             Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
+            
             item.MouseButton1Click:Connect(function()
                 selLbl.Text = tostring(v)
-                listFrame.Visible = false
-                open = false
+                closeList()
                 local ok, err = pcall(onChange, v)
                 if not ok then warn("[BPFiller] dropdown error: " .. tostring(err)) end
             end)
-            table.insert(entries, item)
         end
-        listFrame.Size = UDim2.fromOffset(220, math.min(#currentValues * 28 + 8, 240))
-    end
-    rebuildEntries()
-
-    local ddHandle
-
-    local function openList()
-        closeAllDropdowns(ddHandle)
-        -- Position relative to the parent frame, not absolute screen position
-        listFrame.Position = UDim2.new(0, 118, 1, 4)
-        listFrame.Size = UDim2.fromOffset(
-            math.max(180, sel.AbsoluteSize.X),
-            math.min(#currentValues * 28 + 8, 240)
-        )
-        listFrame.Visible = true
         open = true
-    end
-
-    local function closeList()
-        listFrame.Visible = false
-        open = false
     end
 
     sel.MouseButton1Click:Connect(function()
         if open then closeList() else openList() end
     end)
 
-    ddHandle = {
+    local ddHandle = {
         Set = function(_, v) selLbl.Text = tostring(v) end,
         SetValues = function(_, newValues)
             currentValues = newValues
-            rebuildEntries()
+            if open then
+                closeList()
+                openList()
+            end
         end,
         close = closeList,
         frame = frame,
-        listFrame = listFrame,
     }
     table.insert(openDropdowns, ddHandle)
     return ddHandle
@@ -821,17 +826,9 @@ UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.UserInputType ~= Enum.UserInputType.MouseButton1
     and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    local pos = input.Position
+    
     for _, dd in ipairs(openDropdowns) do
-        if dd.listFrame.Visible then
-            local ap = dd.listFrame.AbsolutePosition
-            local as = dd.listFrame.AbsoluteSize
-            local inList = pos.X >= ap.X and pos.X <= ap.X + as.X
-                       and pos.Y >= ap.Y and pos.Y <= ap.Y + as.Y
-            if not inList then
-                dd:close()
-            end
-        end
+        dd:close()
     end
 end)
 
@@ -1209,10 +1206,12 @@ minimizeBtn.MouseButton1Click:Connect(function()
         panel.Size = UDim2.fromOffset(panel.AbsoluteSize.X, 42)
         body.Visible = false
         resizeHandle.Visible = false
+        overlay.Visible = false
     else
         panel.Size = savedSize
         body.Visible = true
         resizeHandle.Visible = true
+        overlay.Visible = true
     end
 end)
 
