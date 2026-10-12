@@ -18,7 +18,7 @@ local filterMinY        = 0
 local filterMaxY        = 1000
 local selectedTreeClass = nil
 local selectedPlayer    = plr
-local selectedWoodOwner = plr   -- NEW
+local selectedWoodOwner = plr
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -41,7 +41,7 @@ local function getPlayerModels()
 end
 
 local function ownerMatches(model, who)
-    if not model then return false end
+    if not model or not who then return false end
     local owner = model:FindFirstChild("Owner")
     if not owner then return false end
     local ok, val = pcall(function() return owner.Value end)
@@ -65,17 +65,12 @@ local function ownerMatches(model, who)
     return false
 end
 
--- Checks against selected wood owner (was isMine)
-local function isSelectedWoodOwner(model)
-    return ownerMatches(model, selectedWoodOwner)
-end
-
 local function isLoosePlank(model)
     if not model or not model:IsA("Model") then return false end
     if model.Name ~= "Plank" then return false end
     if not model:FindFirstChild("TreeClass") then return false end
     if not model:FindFirstChildWhichIsA("BasePart") then return false end
-    if not isSelectedWoodOwner(model) then return false end
+    if not ownerMatches(model, selectedWoodOwner) then return false end
     return true
 end
 
@@ -234,7 +229,7 @@ local function collectBlueprints()
     return list
 end
 
--- ─────────── KRON HUB STYLE UI (SCALED DOWN) ───────────
+-- ─────────── UI ───────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "BPFillerStandalone"
 gui.ResetOnSpawn = false
@@ -267,7 +262,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 420
+local panelW, panelH = 320, 440
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -683,6 +678,7 @@ local function closeAllDropdowns(except)
     end
 end
 
+-- UPDATED: label width is wider so long labels like "Fill Blueprints Of" fit
 local function makeDropdown(text, values, default, onChange, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_DROPDOWN)
@@ -693,7 +689,7 @@ local function makeDropdown(text, values, default, onChange, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(90, ROW_DROPDOWN)
+    t.Size = UDim2.fromOffset(105, ROW_DROPDOWN)
     t.Position = UDim2.fromOffset(6, 0)
     t.BackgroundTransparency = 1
     t.Text = text
@@ -704,8 +700,8 @@ local function makeDropdown(text, values, default, onChange, order)
     t.Parent = frame
 
     local sel = Instance.new("TextButton")
-    sel.Size = UDim2.new(1, -108, 0, 26)
-    sel.Position = UDim2.new(0, 100, 0.5, -13)
+    sel.Size = UDim2.new(1, -120, 0, 26)
+    sel.Position = UDim2.new(0, 112, 0.5, -13)
     sel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     sel.BorderSizePixel = 0
     sel.Text = ""
@@ -752,7 +748,7 @@ local function makeDropdown(text, values, default, onChange, order)
 
     local function openList()
         closeAllDropdowns()
-        
+
         listFrame = Instance.new("ScrollingFrame")
         listFrame.Name = "DropdownList"
         listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
@@ -763,11 +759,11 @@ local function makeDropdown(text, values, default, onChange, order)
         listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
         listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
         listFrame.ClipsDescendants = true
-        
+
         local ap = sel.AbsolutePosition
         listFrame.Position = UDim2.fromOffset(ap.X, ap.Y + sel.AbsoluteSize.Y + 2)
         listFrame.Size = UDim2.fromOffset(sel.AbsoluteSize.X, math.min(#currentValues * 24 + 6, 160))
-        
+
         listFrame.Parent = gui
         Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 5)
         local ls = Instance.new("UIStroke", listFrame)
@@ -790,7 +786,7 @@ local function makeDropdown(text, values, default, onChange, order)
             item.TextSize = 11
             item.Parent = listFrame
             Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
-            
+
             item.MouseButton1Click:Connect(function()
                 selLbl.Text = tostring(v)
                 closeList()
@@ -825,19 +821,19 @@ UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.UserInputType ~= Enum.UserInputType.MouseButton1
     and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    
+
     for _, dd in ipairs(openDropdowns) do
         dd:close()
     end
 end)
 
--- ─────────── LOGIC FUNCTIONS ───────────
+-- ─────────── LOGIC ───────────
 local statusPara = nil
 local inventoryPara = nil
 local treeLabelPara = nil
 local woodTypeDropdown = nil
 local playerDropdown = nil
-local woodOwnerDropdown = nil   -- NEW
+local woodOwnerDropdown = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -899,7 +895,7 @@ local function fillAllBlueprints()
 
     local pl = collectMatchingPlanks()
     if #pl == 0 then
-        setStatus("No matching planks (check filter / wood type / wood owner)")
+        setStatus("No matching planks (wood from " .. selectedWoodOwner.Name .. ")")
         return
     end
 
@@ -911,7 +907,7 @@ local function fillAllBlueprints()
 
     autoFillRunning = true
     autoFillCancel = false
-    setStatus(string.format("Fill: %d bps, %d planks (wood: %s)", #bps, #pl, selectedWoodOwner.Name))
+    setStatus(string.format("Fill: %d bps / %d planks (%s's wood)", #bps, #pl, selectedWoodOwner.Name))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -943,7 +939,7 @@ local function fillAllBlueprints()
         end
 
         autoFillRunning = false
-        setStatus(string.format("Auto fill done: %d filled, %d failed", filled, failed))
+        setStatus(string.format("Done: %d filled, %d failed", filled, failed))
     end)
 end
 
@@ -1082,7 +1078,7 @@ local function updateInventory()
     local byTree, total = scanPlanks()
     if inventoryPara then
         if total == 0 then
-            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks)") end)
+            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks for " .. selectedWoodOwner.Name .. ")") end)
         else
             local parts = {}
             for tc, data in pairs(byTree) do
@@ -1113,26 +1109,13 @@ local function updateInventory()
     end
 end
 
--- ─────────── BUILD THE UI ───────────
+-- ─────────── BUILD UI ───────────
 local order = 0
 local function nextOrder() order += 1; return order end
 
-makeSection("PLANK SOURCE", nextOrder())
-
-makeParagraph("How it works",
-    "Pick a loose plank you own. The filler reads its wood type, then teleports matching planks onto the target player's blueprints.",
-    nextOrder())
-
-pickBtnHandle = makeButton("Pick Plank",
-    "Click a loose plank in the world to set the target",
-    function() startPickMode() end,
-    nextOrder())
-
-treeLabelPara = makeParagraph("Selected Wood Type", "None (all types)", nextOrder())
-
 makeSection("TARGET", nextOrder())
 
-playerDropdown = makeDropdown("Blueprint Owner", getPlayerOptions(), "(Me)", function(opt)
+playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(), "(Me)", function(opt)
     if opt == "(Me)" then
         selectedPlayer = plr
     else
@@ -1142,27 +1125,37 @@ playerDropdown = makeDropdown("Blueprint Owner", getPlayerOptions(), "(Me)", fun
     setStatus("Blueprint owner: " .. selectedPlayer.Name)
 end, nextOrder())
 
--- NEW: Wood Owner dropdown
-woodOwnerDropdown = makeDropdown("Wood Owner", getPlayerOptions(), "(Me)", function(opt)
+woodOwnerDropdown = makeDropdown("Use Wood From", getPlayerOptions(), "(Me)", function(opt)
     if opt == "(Me)" then
         selectedWoodOwner = plr
     else
         local found = Players:FindFirstChild(opt)
         selectedWoodOwner = found or plr
     end
-    setStatus("Wood owner: " .. selectedWoodOwner.Name)
+    setStatus("Wood source: " .. selectedWoodOwner.Name)
+    updateInventory()
 end, nextOrder())
 
 woodTypeDropdown = makeDropdown("Wood Type", getWoodTypeOptions(nil), "(All)", function(opt)
     if opt == "(All)" then
         selectedTreeClass = nil
-        pcall(function() treeLabelPara:setDesc(treeLabelPara, "All wood types") end)
     else
         selectedTreeClass = opt
+    end
+    if treeLabelPara then
         pcall(function() treeLabelPara:setDesc(treeLabelPara, opt) end)
     end
     setStatus("Wood type: " .. opt)
 end, nextOrder())
+
+makeSection("PLANK SOURCE", nextOrder())
+
+pickBtnHandle = makeButton("Pick Plank",
+    "Click a loose plank in the world to set the target wood type",
+    function() startPickMode() end,
+    nextOrder())
+
+treeLabelPara = makeParagraph("Selected Wood Type", "None (all types)", nextOrder())
 
 makeInput("Min Y Size", tostring(filterMinY), function(t)
     local n = tonumber(t); if n then filterMinY = n end
@@ -1179,7 +1172,7 @@ end, nextOrder())
 makeSection("FILL", nextOrder())
 
 makeButton("Auto Fill All",
-    "One-shot: fill every blueprint owned by the selected player with a matching plank",
+    "One-shot: fill every blueprint owned by the target player using the selected wood",
     function() fillAllBlueprints() end,
     nextOrder())
 
@@ -1212,9 +1205,9 @@ end, nextOrder())
 
 makeSection("STATUS", nextOrder())
 
-statusPara = makeParagraph("Status", "Ready - pick a plank to begin", nextOrder())
+statusPara = makeParagraph("Status", "Ready", nextOrder())
 
--- ─────────── TOGGLE / MINIMIZE / CLOSE ───────────
+-- ─────────── MIN / CLOSE / RESIZE ───────────
 local minimized = false
 local savedSize = panel.Size
 
@@ -1242,7 +1235,6 @@ closeBtn.MouseButton1Click:Connect(function()
     _G._BPFillerGui = nil
 end)
 
--- ─────────── RESIZE HANDLE ───────────
 local resizing = false
 local resizeStartMouse, resizeStartSize
 
@@ -1275,28 +1267,6 @@ UIS.InputEnded:Connect(function(input)
     end
 end)
 
-local function onViewportChange()
-    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
-    if not vp then return end
-    local w, h = 320, 420
-    local curW = panel.AbsoluteSize.X
-    local curH = panel.AbsoluteSize.Y
-    if curW > w or curH > h then
-        panel.Size = UDim2.fromOffset(math.min(curW, w), math.min(curH, h))
-    end
-    local pos = panel.AbsolutePosition
-    local size = panel.AbsoluteSize
-    local nx = math.clamp(pos.X, 0, math.max(0, vp.X - size.X))
-    local ny = math.clamp(pos.Y, 0, math.max(0, vp.Y - size.Y))
-    if nx ~= pos.X or ny ~= pos.Y then
-        panel.Position = UDim2.fromOffset(nx, ny)
-    end
-end
-
-if workspace.CurrentCamera then
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(onViewportChange)
-end
-
 -- ─────────── PLAYER LIST REFRESH ───────────
 Players.PlayerAdded:Connect(function()
     if playerDropdown then
@@ -1328,7 +1298,7 @@ Players.PlayerRemoving:Connect(function(p)
     end
 end)
 
--- ─────────── BACKGROUND LOOPS ───────────
+-- ─────────── BACKGROUND ───────────
 RunService.Heartbeat:Connect(function(dt)
     if not gui.Parent then return end
     lastScanAccum += dt
@@ -1352,4 +1322,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] Loaded. Click the floating gear button to open/close.")
+print("[BPFiller] Loaded.")
