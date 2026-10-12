@@ -1,1 +1,1319 @@
+if _G._BPFillerGui and _G._BPFillerGui.Parent then
+    pcall(function() _G._BPFillerGui:Destroy() end)
+end
+if _G._BPFillerGui then _G._BPFillerGui = nil end
 
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local RS2 = game:GetService("ReplicatedStorage")
+
+local plr = Players.LocalPlayer
+local Mouse = plr:GetMouse()
+
+local ClientIsDragging = RS2:WaitForChild("Interaction"):WaitForChild("ClientIsDragging", 10)
+
+local fillDelay         = 0.15
+local filterMinY        = 0
+local filterMaxY        = 1000
+local selectedTreeClass = nil
+local selectedPlayer    = plr
+
+local LT2_WOOD_PRESETS = {
+    "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
+    "Palm", "Bamboo", "Cactus", "Gold Wood", "Lava Wood", "Zombie Wood",
+    "Spooky Wood", "Sinister Wood", "Cavecrawler Wood"
+}
+
+local autoFillRunning   = false
+local autoFillCancel    = false
+local loopMode          = false
+local loopRunning       = false
+local clickMode         = false
+local clickConn         = nil
+
+local SCAN_INTERVAL     = 2
+local lastScanAccum     = 0
+
+local function getPlayerModels()
+    return workspace:FindFirstChild("PlayerModels")
+end
+
+local function ownerMatches(model, who)
+    if not model then return false end
+    local owner = model:FindFirstChild("Owner")
+    if not owner then return false end
+    local ok, val = pcall(function() return owner.Value end)
+    if not ok or val == nil then return false end
+
+    if typeof(val) == "Instance" then
+        if val == who then return true end
+        local name, uid
+        pcall(function() name = val.Name end)
+        pcall(function() uid = val.UserId end)
+        if name and (name == who.Name or name == who.DisplayName) then return true end
+        if uid and uid == who.UserId then return true end
+        return false
+    end
+
+    local s = tostring(val)
+    if s == who.Name or s == who.DisplayName then return true end
+    if s == tostring(who.UserId) then return true end
+    if s:lower() == who.Name:lower() then return true end
+    if s:lower() == who.DisplayName:lower() then return true end
+    return false
+end
+
+local function isMine(model)
+    return ownerMatches(model, plr)
+end
+
+local function isLoosePlank(model)
+    if not model or not model:IsA("Model") then return false end
+    if model.Name ~= "Plank" then return false end
+    if not model:FindFirstChild("TreeClass") then return false end
+    if not model:FindFirstChildWhichIsA("BasePart") then return false end
+    if not isMine(model) then return false end
+    return true
+end
+
+local function plankPart(model)
+    if not model then return nil end
+    return model:FindFirstChild("WoodSection")
+        or model:FindFirstChild("Main")
+        or model:FindFirstChildWhichIsA("BasePart")
+end
+
+local function plankTreeClass(model)
+    local tc = model and model:FindFirstChild("TreeClass")
+    if tc and tc:IsA("StringValue") then return tc.Value end
+    return nil
+end
+
+local function plankSizeY(model)
+    local p = plankPart(model)
+    return p and p.Size.Y or nil
+end
+
+local function isBlueprint(model)
+    if not model or not model:IsA("Model") then return false end
+    if not ownerMatches(model, selectedPlayer) then return false end
+    local t = model:FindFirstChild("Type")
+    return t and t:IsA("StringValue") and t.Value == "Blueprint"
+end
+
+local function blueprintCenter(model)
+    if not model then return nil end
+    if model.PrimaryPart then return model.PrimaryPart.Position end
+    local main = model:FindFirstChild("Main")
+    if main and main:IsA("BasePart") then return main.Position end
+    local mcf = model:FindFirstChild("MainCFrame")
+    if mcf and mcf:IsA("CFrameValue") then return mcf.Value.Position end
+    local sum, count = Vector3.zero, 0
+    for _, p in ipairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then
+            sum += p.Position
+            count += 1
+        end
+    end
+    if count > 0 then return sum / count end
+    return nil
+end
+
+local function grabOwnership(model, timeout)
+    timeout = timeout or 1.0
+    if not model or not model.Parent then return false end
+    if not ClientIsDragging then return false end
+
+    local lastInteracted = nil
+    local ownerFolder = model:FindFirstChild("Owner")
+    if ownerFolder then
+        lastInteracted = ownerFolder:FindFirstChild("LastInteraction")
+    end
+    if not lastInteracted then
+        lastInteracted = model:FindFirstChild("LastInteraction")
+    end
+
+    local startVal = nil
+    if lastInteracted then
+        pcall(function() startVal = lastInteracted.Value end)
+    end
+
+    local deadline = tick() + timeout
+    while tick() < deadline do
+        if not model.Parent then return false end
+        pcall(function() ClientIsDragging:FireServer(model) end)
+        if lastInteracted then
+            local cur
+            pcall(function() cur = lastInteracted.Value end)
+            if cur ~= startVal and cur ~= nil then
+                return true
+            end
+        end
+        task.wait()
+    end
+    return lastInteracted == nil
+end
+
+local function teleportObjectTo(part, goalCF, root)
+    if not part or not part.Parent then return false end
+    local model = part:FindFirstAncestorOfClass("Model") or part.Parent
+
+    if root then
+        local flat = (root.Position - part.Position) * Vector3.new(1, 0, 1)
+        if flat.Magnitude > 10 then
+            root.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+            task.wait(0.15)
+        end
+    end
+
+    task.wait(0.05)
+    local got = grabOwnership(model, 1.0)
+    task.wait(0.05)
+
+    if part and part.Parent then
+        part.CFrame = goalCF
+    end
+    task.wait(0.1)
+    return got
+end
+
+local function scanPlanks()
+    local pm = getPlayerModels()
+    local byTree = {}
+    local total = 0
+    if not pm then return byTree, total end
+    for _, m in ipairs(pm:GetChildren()) do
+        if isLoosePlank(m) then
+            local tc = plankTreeClass(m) or "?"
+            local y = plankSizeY(m) or 0
+            byTree[tc] = byTree[tc] or { count = 0, sizes = {} }
+            byTree[tc].count += 1
+            local key = string.format("%.2f", y)
+            byTree[tc].sizes[key] = (byTree[tc].sizes[key] or 0) + 1
+            total += 1
+        end
+    end
+    return byTree, total
+end
+
+local function collectMatchingPlanks()
+    local pm = getPlayerModels()
+    local list = {}
+    if not pm then return list end
+    for _, m in ipairs(pm:GetChildren()) do
+        if isLoosePlank(m) then
+            local tc = plankTreeClass(m)
+            local y = plankSizeY(m)
+            if tc and y then
+                local treeOK = (not selectedTreeClass) or (tc == selectedTreeClass)
+                local sizeOK = (y >= filterMinY and y <= filterMaxY)
+                if treeOK and sizeOK then
+                    local p = plankPart(m)
+                    if p then
+                        table.insert(list, { model = m, part = p, treeClass = tc, sizeY = y })
+                    end
+                end
+            end
+        end
+    end
+    return list
+end
+
+local function collectBlueprints()
+    local pm = getPlayerModels()
+    local list = {}
+    if not pm then return list end
+    for _, m in ipairs(pm:GetChildren()) do
+        if isBlueprint(m) then
+            table.insert(list, m)
+        end
+    end
+    return list
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "BPFillerStandalone"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 100
+gui.IgnoreGuiInset = false
+gui.Parent = plr:WaitForChild("PlayerGui")
+_G._BPFillerGui = gui
+
+local camera = workspace.CurrentCamera
+local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+
+local function computePanelSize(vp)
+    if not vp then vp = Vector2.new(1280, 720) end
+    local small = vp.X < 800 or vp.Y < 600
+    if small then
+        return math.clamp(vp.X - 20, 240, 420),
+               math.clamp(vp.Y - 40, 300, 620)
+    end
+    return math.clamp(vp.X * 0.35, 380, 460),
+           math.clamp(vp.Y * 0.75, 420, 640)
+end
+
+local panelW, panelH = computePanelSize(viewport)
+
+local panel = Instance.new("Frame")
+panel.Name = "MainPanel"
+panel.Size = UDim2.fromOffset(panelW, panelH)
+panel.Position = UDim2.new(0.5, -panelW / 2, 0.5, -panelH / 2)
+panel.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+panel.BorderSizePixel = 0
+panel.Active = true
+panel.Draggable = true
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+local pStroke = Instance.new("UIStroke", panel)
+pStroke.Color = Color3.fromRGB(60, 60, 72)
+pStroke.Thickness = 1
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 42)
+titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = panel
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 12)
+local tbFix = Instance.new("Frame", titleBar)
+tbFix.Size = UDim2.new(1, 0, 0.5, 0)
+tbFix.Position = UDim2.new(0, 0, 0.5, 0)
+tbFix.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+tbFix.BorderSizePixel = 0
+
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1, -100, 1, 0)
+titleLbl.Position = UDim2.fromOffset(14, 0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Text = "Blueprint Filler"
+titleLbl.TextColor3 = Color3.fromRGB(235, 235, 240)
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.TextSize = 15
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+titleLbl.Parent = titleBar
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.fromOffset(26, 26)
+minimizeBtn.Position = UDim2.new(1, -64, 0, 8)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Text = "—"
+minimizeBtn.TextColor3 = Color3.fromRGB(220, 220, 230)
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 14
+minimizeBtn.Parent = titleBar
+Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 6)
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.fromOffset(26, 26)
+closeBtn.Position = UDim2.new(1, -34, 0, 8)
+closeBtn.BackgroundColor3 = Color3.fromRGB(90, 30, 30)
+closeBtn.BorderSizePixel = 0
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(240, 200, 200)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 13
+closeBtn.Parent = titleBar
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+local body = Instance.new("ScrollingFrame")
+body.Size = UDim2.new(1, -20, 1, -54)
+body.Position = UDim2.fromOffset(10, 46)
+body.BackgroundTransparency = 1
+body.BorderSizePixel = 0
+body.ScrollBarThickness = 6
+body.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
+body.CanvasSize = UDim2.new(0, 0, 0, 0)
+body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+body.Parent = panel
+
+local layout = Instance.new("UIListLayout", body)
+layout.Padding = UDim.new(0, 8)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local resizeHandle = Instance.new("TextButton")
+resizeHandle.Size = UDim2.fromOffset(20, 20)
+resizeHandle.Position = UDim2.new(1, -24, 1, -24)
+resizeHandle.BackgroundColor3 = Color3.fromRGB(50, 50, 62)
+resizeHandle.BorderSizePixel = 0
+resizeHandle.Text = ""
+resizeHandle.AutoButtonColor = false
+resizeHandle.Parent = panel
+Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 5)
+
+for i = 1, 3 do
+    local line = Instance.new("Frame")
+    line.Size = UDim2.fromOffset(10 - i * 2, 1)
+    line.Position = UDim2.fromOffset(4, 5 + i * 3)
+    line.BackgroundColor3 = Color3.fromRGB(150, 150, 170)
+    line.BorderSizePixel = 0
+    line.Parent = resizeHandle
+end
+
+local ROW_SECTION  = 26
+local ROW_PARA     = 48
+local ROW_BTN      = 40
+local ROW_BTN_DESC = 54
+local ROW_TOGGLE   = 42
+local ROW_TOG_DESC = 54
+local ROW_INPUT    = 36
+local ROW_SLIDER   = 54
+local ROW_DROPDOWN = 44
+
+local function makeSection(text, order)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, ROW_SECTION)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "  " .. text
+    lbl.TextColor3 = Color3.fromRGB(160, 160, 180)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.LayoutOrder = order
+    lbl.Parent = body
+    return lbl
+end
+
+local function makeParagraph(title, desc, order, color)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, ROW_PARA)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.LayoutOrder = order
+    frame.Parent = body
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -16, 0, 18)
+    t.Position = UDim2.fromOffset(8, 5)
+    t.BackgroundTransparency = 1
+    t.Text = title
+    t.TextColor3 = Color3.fromRGB(220, 220, 230)
+    t.Font = Enum.Font.GothamMedium
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = frame
+
+    local d = Instance.new("TextLabel")
+    d.Size = UDim2.new(1, -16, 0, 22)
+    d.Position = UDim2.fromOffset(8, 22)
+    d.BackgroundTransparency = 1
+    d.Text = desc
+    d.TextColor3 = color or Color3.fromRGB(150, 150, 165)
+    d.Font = Enum.Font.Gotham
+    d.TextSize = 11
+    d.TextXAlignment = Enum.TextXAlignment.Left
+    d.TextWrapped = true
+    d.Parent = frame
+
+    return { setDesc = function(_, txt) d.Text = txt end, frame = frame }
+end
+
+local function makeButton(text, desc, onClick, order)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, desc and ROW_BTN_DESC or ROW_BTN)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.AutoButtonColor = true
+    btn.LayoutOrder = order
+    btn.Parent = body
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    local stroke = Instance.new("UIStroke", btn)
+    stroke.Color = Color3.fromRGB(60, 60, 75)
+    stroke.Thickness = 1
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -16, 0, 18)
+    t.Position = UDim2.fromOffset(8, desc and 5 or 10)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextColor3 = Color3.fromRGB(230, 230, 240)
+    t.Font = Enum.Font.GothamBold
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = btn
+
+    if desc then
+        local d = Instance.new("TextLabel")
+        d.Size = UDim2.new(1, -16, 0, 24)
+        d.Position = UDim2.fromOffset(8, 24)
+        d.BackgroundTransparency = 1
+        d.Text = desc
+        d.TextColor3 = Color3.fromRGB(140, 140, 155)
+        d.Font = Enum.Font.Gotham
+        d.TextSize = 10
+        d.TextXAlignment = Enum.TextXAlignment.Left
+        d.TextWrapped = true
+        d.Parent = btn
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        local ok, err = pcall(onClick)
+        if not ok then warn("[BPFiller] button error: " .. tostring(err)) end
+    end)
+    return btn
+end
+
+local function makeToggle(text, desc, default, onChange, order)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, desc and ROW_TOG_DESC or ROW_TOGGLE)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.LayoutOrder = order
+    frame.Parent = body
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -70, 0, 18)
+    t.Position = UDim2.fromOffset(8, desc and 5 or 12)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextColor3 = Color3.fromRGB(220, 220, 230)
+    t.Font = Enum.Font.GothamMedium
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = frame
+
+    if desc then
+        local d = Instance.new("TextLabel")
+        d.Size = UDim2.new(1, -70, 0, 24)
+        d.Position = UDim2.fromOffset(8, 24)
+        d.BackgroundTransparency = 1
+        d.Text = desc
+        d.TextColor3 = Color3.fromRGB(140, 140, 155)
+        d.Font = Enum.Font.Gotham
+        d.TextSize = 10
+        d.TextXAlignment = Enum.TextXAlignment.Left
+        d.TextWrapped = true
+        d.Parent = frame
+    end
+
+    local state = default
+    local switch = Instance.new("TextButton")
+    switch.Size = UDim2.fromOffset(48, 26)
+    switch.Position = UDim2.new(1, -56, 0.5, -13)
+    switch.BackgroundColor3 = state and Color3.fromRGB(40, 130, 70) or Color3.fromRGB(50, 50, 62)
+    switch.BorderSizePixel = 0
+    switch.Text = ""
+    switch.Parent = frame
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(0, 13)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.fromOffset(20, 20)
+    knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
+    knob.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
+    knob.BorderSizePixel = 0
+    knob.Parent = switch
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 10)
+
+    local function setState(v)
+        state = v
+        switch.BackgroundColor3 = state and Color3.fromRGB(40, 130, 70) or Color3.fromRGB(50, 50, 62)
+        knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
+    end
+
+    switch.MouseButton1Click:Connect(function()
+        setState(not state)
+        local ok, err = pcall(onChange, state)
+        if not ok then warn("[BPFiller] toggle error: " .. tostring(err)) end
+    end)
+    return { Set = function(_, v) setState(v) end }
+end
+
+local function makeInput(text, default, onChange, order)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, ROW_INPUT)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.LayoutOrder = order
+    frame.Parent = body
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.fromOffset(110, ROW_INPUT)
+    t.Position = UDim2.fromOffset(8, 0)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextColor3 = Color3.fromRGB(200, 200, 215)
+    t.Font = Enum.Font.Gotham
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = frame
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, -130, 0, 28)
+    box.Position = UDim2.new(0, 118, 0.5, -14)
+    box.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    box.BorderSizePixel = 0
+    box.Text = tostring(default)
+    box.TextColor3 = Color3.fromRGB(230, 230, 240)
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 13
+    box.ClearTextOnFocus = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.Parent = frame
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+    local bs = Instance.new("UIStroke", box)
+    bs.Color = Color3.fromRGB(55, 55, 70)
+    bs.Thickness = 1
+
+    box.FocusLost:Connect(function()
+        local ok, err = pcall(onChange, box.Text)
+        if not ok then warn("[BPFiller] input error: " .. tostring(err)) end
+    end)
+    return { Set = function(_, v) box.Text = tostring(v) end }
+end
+
+local function makeSlider(text, min, max, default, onChange, order)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, ROW_SLIDER)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.LayoutOrder = order
+    frame.Parent = body
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -70, 0, 18)
+    t.Position = UDim2.fromOffset(8, 5)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextColor3 = Color3.fromRGB(220, 220, 230)
+    t.Font = Enum.Font.GothamMedium
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = frame
+
+    local valLbl = Instance.new("TextLabel")
+    valLbl.Size = UDim2.fromOffset(60, 18)
+    valLbl.Position = UDim2.new(1, -68, 0, 5)
+    valLbl.BackgroundTransparency = 1
+    valLbl.Text = tostring(default)
+    valLbl.TextColor3 = Color3.fromRGB(180, 220, 190)
+    valLbl.Font = Enum.Font.Code
+    valLbl.TextSize = 12
+    valLbl.TextXAlignment = Enum.TextXAlignment.Right
+    valLbl.Parent = frame
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1, -16, 0, 8)
+    track.Position = UDim2.fromOffset(8, 36)
+    track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    track.BorderSizePixel = 0
+    track.Parent = frame
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.fromOffset(18, 18)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
+    knob.BackgroundColor3 = Color3.fromRGB(230, 230, 240)
+    knob.BorderSizePixel = 0
+    knob.Parent = track
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 9)
+
+    local dragging = false
+
+    local function setFromX(x)
+        local abs = track.AbsolutePosition.X
+        local size = track.AbsoluteSize.X
+        if size <= 0 then return end
+        local frac = math.clamp((x - abs) / size, 0, 1)
+        local val = min + (max - min) * frac
+        fill.Size = UDim2.new(frac, 0, 1, 0)
+        knob.Position = UDim2.new(frac, 0, 0.5, 0)
+        valLbl.Text = string.format("%.3g", val)
+        local ok, err = pcall(onChange, val)
+        if not ok then warn("[BPFiller] slider error: " .. tostring(err)) end
+    end
+
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            setFromX(input.Position.X)
+        end
+    end)
+    frame.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            setFromX(input.Position.X)
+        end
+    end)
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+local openDropdowns = {}
+
+local function closeAllDropdowns(except)
+    for _, dd in ipairs(openDropdowns) do
+        if dd ~= except then
+            dd:close()
+        end
+    end
+end
+
+local function makeDropdown(text, values, default, onChange, order)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, ROW_DROPDOWN)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.LayoutOrder = order
+    frame.Parent = body
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.fromOffset(110, ROW_DROPDOWN)
+    t.Position = UDim2.fromOffset(8, 0)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextColor3 = Color3.fromRGB(200, 200, 215)
+    t.Font = Enum.Font.GothamMedium
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = frame
+
+    local sel = Instance.new("TextButton")
+    sel.Size = UDim2.new(1, -152, 0, 30)
+    sel.Position = UDim2.new(0, 118, 0.5, -15)
+    sel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    sel.BorderSizePixel = 0
+    sel.Text = ""
+    sel.AutoButtonColor = true
+    sel.TextXAlignment = Enum.TextXAlignment.Left
+    sel.Parent = frame
+    Instance.new("UICorner", sel).CornerRadius = UDim.new(0, 6)
+    local ss = Instance.new("UIStroke", sel)
+    ss.Color = Color3.fromRGB(55, 55, 70)
+    ss.Thickness = 1
+
+    local selLbl = Instance.new("TextLabel")
+    selLbl.Size = UDim2.new(1, -26, 1, 0)
+    selLbl.Position = UDim2.fromOffset(8, 0)
+    selLbl.BackgroundTransparency = 1
+    selLbl.Text = tostring(default)
+    selLbl.TextColor3 = Color3.fromRGB(230, 230, 240)
+    selLbl.Font = Enum.Font.Gotham
+    selLbl.TextSize = 12
+    selLbl.TextXAlignment = Enum.TextXAlignment.Left
+    selLbl.Parent = sel
+
+    local arrow = Instance.new("TextLabel")
+    arrow.Size = UDim2.fromOffset(20, 30)
+    arrow.Position = UDim2.new(1, -22, 0, 0)
+    arrow.BackgroundTransparency = 1
+    arrow.Text = "v"
+    arrow.TextColor3 = Color3.fromRGB(150, 150, 165)
+    arrow.Font = Enum.Font.GothamBold
+    arrow.TextSize = 11
+    arrow.Parent = sel
+
+    local currentValues = values
+    local open = false
+
+    local listFrame = Instance.new("ScrollingFrame")
+    listFrame.Name = "DropdownList"
+    listFrame.Size = UDim2.fromOffset(220, math.min(#values * 28 + 8, 240))
+    listFrame.Position = UDim2.fromOffset(0, 0)
+    listFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    listFrame.BorderSizePixel = 0
+    listFrame.Visible = false
+    listFrame.ZIndex = 200
+    listFrame.ScrollBarThickness = 5
+    listFrame.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
+    listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    listFrame.Parent = frame -- Parented to the row frame instead of gui
+    Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 6)
+    local ls = Instance.new("UIStroke", listFrame)
+    ls.Color = Color3.fromRGB(80, 80, 105)
+    ls.Thickness = 1
+
+    local lLayout = Instance.new("UIListLayout", listFrame)
+    lLayout.Padding = UDim.new(0, 2)
+    lLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    lLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    local entries = {}
+
+    local function rebuildEntries()
+        for _, e in ipairs(entries) do e:Destroy() end
+        entries = {}
+        for _, v in ipairs(currentValues) do
+            local item = Instance.new("TextButton")
+            item.Size = UDim2.new(1, -8, 0, 24)
+            item.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+            item.BorderSizePixel = 0
+            item.Text = tostring(v)
+            item.TextColor3 = Color3.fromRGB(220, 220, 230)
+            item.Font = Enum.Font.Gotham
+            item.TextSize = 11
+            item.Parent = listFrame
+            Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
+            item.MouseButton1Click:Connect(function()
+                selLbl.Text = tostring(v)
+                listFrame.Visible = false
+                open = false
+                local ok, err = pcall(onChange, v)
+                if not ok then warn("[BPFiller] dropdown error: " .. tostring(err)) end
+            end)
+            table.insert(entries, item)
+        end
+        listFrame.Size = UDim2.fromOffset(220, math.min(#currentValues * 28 + 8, 240))
+    end
+    rebuildEntries()
+
+    local ddHandle
+
+    local function openList()
+        closeAllDropdowns(ddHandle)
+        -- Position relative to the parent frame, not absolute screen position
+        listFrame.Position = UDim2.new(0, 118, 1, 4)
+        listFrame.Size = UDim2.fromOffset(
+            math.max(180, sel.AbsoluteSize.X),
+            math.min(#currentValues * 28 + 8, 240)
+        )
+        listFrame.Visible = true
+        open = true
+    end
+
+    local function closeList()
+        listFrame.Visible = false
+        open = false
+    end
+
+    sel.MouseButton1Click:Connect(function()
+        if open then closeList() else openList() end
+    end)
+
+    ddHandle = {
+        Set = function(_, v) selLbl.Text = tostring(v) end,
+        SetValues = function(_, newValues)
+            currentValues = newValues
+            rebuildEntries()
+        end,
+        close = closeList,
+        frame = frame,
+        listFrame = listFrame,
+    }
+    table.insert(openDropdowns, ddHandle)
+    return ddHandle
+end
+
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1
+    and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    local pos = input.Position
+    for _, dd in ipairs(openDropdowns) do
+        if dd.listFrame.Visible then
+            local ap = dd.listFrame.AbsolutePosition
+            local as = dd.listFrame.AbsoluteSize
+            local inList = pos.X >= ap.X and pos.X <= ap.X + as.X
+                       and pos.Y >= ap.Y and pos.Y <= ap.Y + as.Y
+            if not inList then
+                dd:close()
+            end
+        end
+    end
+end)
+
+local statusPara = nil
+local inventoryPara = nil
+local treeLabelPara = nil
+local woodTypeDropdown = nil
+local playerDropdown = nil
+
+local function setStatus(text)
+    if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
+    print("[BPFiller] " .. tostring(text))
+end
+
+local function getPlayerOptions()
+    local opts = { "(Me)" }
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= plr then
+            table.insert(opts, p.Name)
+        end
+    end
+    table.sort(opts, function(a, b)
+        if a == "(Me)" then return true end
+        if b == "(Me)" then return false end
+        return a:lower() < b:lower()
+    end)
+    return opts
+end
+
+local function getWoodTypeOptions(discovered)
+    local seen = { ["(All)"] = true }
+    local opts = { "(All)" }
+    for _, w in ipairs(LT2_WOOD_PRESETS) do
+        if not seen[w] then seen[w] = true; table.insert(opts, w) end
+    end
+    if discovered then
+        for tc, _ in pairs(discovered) do
+            if not seen[tc] then seen[tc] = true; table.insert(opts, tc) end
+        end
+    end
+    table.sort(opts, function(a, b)
+        if a == "(All)" then return true end
+        if b == "(All)" then return false end
+        return a:lower() < b:lower()
+    end)
+    return opts
+end
+
+local function fillOneBlueprint(bp, plankEntry, root)
+    if not bp or not bp.Parent then return false, "no bp" end
+    if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
+        return false, "no plank"
+    end
+    local center = blueprintCenter(bp)
+    if not center then return false, "no center" end
+    local goalCF = CFrame.new(center)
+    local ok = teleportObjectTo(plankEntry.part, goalCF, root)
+    return ok, ok and "ok" or "ownership timeout"
+end
+
+local function fillAllBlueprints()
+    if autoFillRunning then
+        autoFillCancel = true
+        setStatus("Cancelling...")
+        return
+    end
+
+    local pl = collectMatchingPlanks()
+    if #pl == 0 then
+        setStatus("No matching planks (check filter / wood type)")
+        return
+    end
+
+    local bps = collectBlueprints()
+    if #bps == 0 then
+        setStatus("No blueprints found for " .. selectedPlayer.Name)
+        return
+    end
+
+    autoFillRunning = true
+    autoFillCancel = false
+    setStatus(string.format("Auto fill for %s: %d bps, %d planks", selectedPlayer.Name, #bps, #pl))
+
+    task.spawn(function()
+        local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        local plankIdx = 1
+        local filled, failed = 0, 0
+
+        for i, bp in ipairs(bps) do
+            if autoFillCancel then break end
+            if not bp.Parent then continue end
+
+            local plankEntry = nil
+            for _ = 1, #pl do
+                local e = pl[plankIdx]
+                plankIdx = (plankIdx % #pl) + 1
+                if e.part and e.part.Parent then
+                    plankEntry = e; break
+                end
+            end
+            if not plankEntry then
+                setStatus("Ran out of matching planks")
+                break
+            end
+
+            setStatus(string.format("Filling %d/%d (%s)", i, #bps, bp.Name))
+
+            local ok = fillOneBlueprint(bp, plankEntry, root)
+            if ok then filled += 1 else failed += 1 end
+            task.wait(fillDelay)
+        end
+
+        autoFillRunning = false
+        setStatus(string.format("Auto fill done: %d filled, %d failed", filled, failed))
+    end)
+end
+
+local function loopTick()
+    if loopRunning then return end
+    if #collectMatchingPlanks() == 0 then
+        setStatus("Loop: waiting for planks...")
+        return
+    end
+
+    local bps = collectBlueprints()
+    if #bps == 0 then return end
+
+    loopRunning = true
+    task.spawn(function()
+        local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        local pl = collectMatchingPlanks()
+        local plankIdx = 1
+        local filled = 0
+
+        for _, bp in ipairs(bps) do
+            if not loopMode then break end
+            if not bp.Parent then continue end
+            local plankEntry = nil
+            for _ = 1, #pl do
+                local e = pl[plankIdx]
+                plankIdx = (plankIdx % math.max(1, #pl)) + 1
+                if e.part and e.part.Parent then
+                    plankEntry = e; break
+                end
+            end
+            if not plankEntry then break end
+            setStatus(string.format("Loop: filling %s", bp.Name))
+            if fillOneBlueprint(bp, plankEntry, root) then
+                filled += 1
+            end
+            task.wait(fillDelay)
+        end
+        loopRunning = false
+        setStatus(string.format("Loop pass: filled %d", filled))
+    end)
+end
+
+local clickToggleHandle = nil
+
+local function stopClickMode()
+    clickMode = false
+    if clickConn then clickConn:Disconnect(); clickConn = nil end
+    if clickToggleHandle then
+        pcall(function() clickToggleHandle:Set(false) end)
+    end
+end
+
+local function startClickMode()
+    clickMode = true
+    clickConn = UIS.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        if not clickMode then return end
+        if not gui.Parent then return end
+
+        local target = Mouse.Target
+        if not target then return end
+        local node = target
+        local pm = getPlayerModels()
+        while node and node.Parent ~= pm do node = node.Parent end
+        if not node or not pm then return end
+        if not isBlueprint(node) then return end
+
+        local pl = collectMatchingPlanks()
+        if #pl == 0 then
+            setStatus("No matching planks")
+            return
+        end
+        local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        local entry = pl[1]
+        setStatus(string.format("Click fill: %s", node.Name))
+        task.spawn(function()
+            if fillOneBlueprint(node, entry, root) then
+                setStatus("Filled " .. node.Name)
+            else
+                setStatus("Fill failed")
+            end
+        end)
+    end)
+end
+
+local pickMode = false
+local pickConn = nil
+local pickBtnHandle = nil
+
+local function stopPickMode()
+    pickMode = false
+    if pickConn then pickConn:Disconnect(); pickConn = nil end
+    if pickBtnHandle then
+        pcall(function() pickBtnHandle.Text = "Pick Plank" end)
+    end
+end
+
+local function startPickMode()
+    if pickMode then stopPickMode(); return end
+    pickMode = true
+    if pickBtnHandle then pickBtnHandle.Text = "Click a plank..." end
+
+    pickConn = UIS.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        if not pickMode then return end
+
+        local target = Mouse.Target
+        if not target then return end
+        local node = target
+        local pm = getPlayerModels()
+        while node and node.Parent ~= pm do node = node.Parent end
+        if not node or not pm then stopPickMode(); return end
+        if not isLoosePlank(node) then
+            setStatus("Not your loose plank")
+            stopPickMode(); return
+        end
+        local tc = plankTreeClass(node)
+        if tc then
+            selectedTreeClass = tc
+            setStatus(string.format("Picked Wood Type=%s. Filter kept wide (0-1000).", tc))
+            if woodTypeDropdown then
+                pcall(function() woodTypeDropdown:Set(tc) end)
+            end
+            if treeLabelPara then
+                pcall(function() treeLabelPara:setDesc(treeLabelPara, tc) end)
+            end
+        end
+        stopPickMode()
+    end)
+end
+
+local function updateInventory()
+    local byTree, total = scanPlanks()
+    if inventoryPara then
+        if total == 0 then
+            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks)") end)
+        else
+            local parts = {}
+            for tc, data in pairs(byTree) do
+                local sizeParts = {}
+                for s, c in pairs(data.sizes) do
+                    table.insert(sizeParts, s .. "x" .. c)
+                end
+                table.sort(sizeParts)
+                table.insert(parts, string.format("%s(%d): %s", tc, data.count, table.concat(sizeParts, ",")))
+            end
+            table.sort(parts)
+            pcall(function()
+                inventoryPara:setDesc(inventoryPara, "Total: " .. total .. "  |  " .. table.concat(parts, "  "))
+            end)
+        end
+    end
+
+    if woodTypeDropdown then
+        pcall(function() woodTypeDropdown:SetValues(getWoodTypeOptions(byTree)) end)
+    end
+
+    if playerDropdown then
+        pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
+    end
+end
+
+local order = 0
+local function nextOrder() order += 1; return order end
+
+makeSection("PLANK SOURCE", nextOrder())
+
+makeParagraph("How it works",
+    "Pick a loose plank you own. The filler reads its wood type, then teleports matching planks onto the target player's blueprints.",
+    nextOrder())
+
+pickBtnHandle = makeButton("Pick Plank",
+    "Click a loose plank in the world to set the target",
+    function() startPickMode() end,
+    nextOrder())
+
+treeLabelPara = makeParagraph("Selected Wood Type", "None (all types)", nextOrder())
+
+makeSection("TARGET", nextOrder())
+
+playerDropdown = makeDropdown("Player", getPlayerOptions(), "(Me)", function(opt)
+    if opt == "(Me)" then
+        selectedPlayer = plr
+    else
+        local found = Players:FindFirstChild(opt)
+        selectedPlayer = found or plr
+    end
+    setStatus("Target player: " .. selectedPlayer.Name)
+end, nextOrder())
+
+woodTypeDropdown = makeDropdown("Wood Type", getWoodTypeOptions(nil), "(All)", function(opt)
+    if opt == "(All)" then
+        selectedTreeClass = nil
+        pcall(function() treeLabelPara:setDesc(treeLabelPara, "All wood types") end)
+    else
+        selectedTreeClass = opt
+        pcall(function() treeLabelPara:setDesc(treeLabelPara, opt) end)
+    end
+    setStatus("Wood type: " .. opt)
+end, nextOrder())
+
+makeInput("Min Y Size", tostring(filterMinY), function(t)
+    local n = tonumber(t); if n then filterMinY = n end
+end, nextOrder())
+
+makeInput("Max Y Size", tostring(filterMaxY), function(t)
+    local n = tonumber(t); if n then filterMaxY = n end
+end, nextOrder())
+
+makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v)
+    fillDelay = v
+end, nextOrder())
+
+makeSection("FILL", nextOrder())
+
+makeButton("Auto Fill All",
+    "One-shot: fill every blueprint owned by the selected player with a matching plank",
+    function() fillAllBlueprints() end,
+    nextOrder())
+
+makeToggle("Loop Mode",
+    "Continuously scan and fill blueprints as new planks appear",
+    false,
+    function(state)
+        loopMode = state
+        setStatus(state and "Loop ON" or "Loop OFF")
+    end,
+    nextOrder())
+
+clickToggleHandle = makeToggle("Click Mode",
+    "Click individual blueprints to fill them one at a time",
+    false,
+    function(state)
+        if state then startClickMode() else stopClickMode() end
+        setStatus(state and "Click mode ON" or "Click mode OFF")
+    end,
+    nextOrder())
+
+makeSection("PLANK INVENTORY", nextOrder())
+
+inventoryPara = makeParagraph("Loose Planks", "Scanning...", nextOrder())
+
+makeButton("Rescan Now", nil, function()
+    updateInventory()
+    setStatus("Scanned")
+end, nextOrder())
+
+makeSection("STATUS", nextOrder())
+
+statusPara = makeParagraph("Status", "Ready - pick a plank to begin", nextOrder())
+
+local minimized = false
+local savedSize = panel.Size
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        savedSize = panel.Size
+        panel.Size = UDim2.fromOffset(panel.AbsoluteSize.X, 42)
+        body.Visible = false
+        resizeHandle.Visible = false
+    else
+        panel.Size = savedSize
+        body.Visible = true
+        resizeHandle.Visible = true
+    end
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    gui:Destroy()
+    _G._BPFillerGui = nil
+end)
+
+local resizing = false
+local resizeStartMouse, resizeStartSize
+
+resizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = true
+        resizeStartMouse = UIS:GetMouseLocation()
+        resizeStartSize = panel.AbsoluteSize
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if not resizing then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local cur = UIS:GetMouseLocation()
+        local dx = cur.X - resizeStartMouse.X
+        local dy = cur.Y - resizeStartMouse.Y
+        local newW = math.clamp(resizeStartSize.X + dx, 240, 700)
+        local newH = math.clamp(resizeStartSize.Y + dy, 260, 900)
+        panel.Size = UDim2.fromOffset(newW, newH)
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = false
+    end
+end)
+
+local function onViewportChange()
+    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+    if not vp then return end
+    local w, h = computePanelSize(vp)
+    local curW = panel.AbsoluteSize.X
+    local curH = panel.AbsoluteSize.Y
+    if curW > w or curH > h then
+        panel.Size = UDim2.fromOffset(math.min(curW, w), math.min(curH, h))
+    end
+    local pos = panel.AbsolutePosition
+    local size = panel.AbsoluteSize
+    local nx = math.clamp(pos.X, 0, math.max(0, vp.X - size.X))
+    local ny = math.clamp(pos.Y, 0, math.max(0, vp.Y - size.Y))
+    if nx ~= pos.X or ny ~= pos.Y then
+        panel.Position = UDim2.fromOffset(nx, ny)
+    end
+end
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(onViewportChange)
+end
+
+Players.PlayerAdded:Connect(function()
+    if playerDropdown then
+        pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    if selectedPlayer == p then
+        selectedPlayer = plr
+        if playerDropdown then
+            pcall(function() playerDropdown:Set("(Me)") end)
+        end
+    end
+    if playerDropdown then
+        pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
+    end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+    if not gui.Parent then return end
+    lastScanAccum += dt
+    if lastScanAccum >= SCAN_INTERVAL then
+        lastScanAccum = 0
+        updateInventory()
+    end
+end)
+
+task.spawn(function()
+    while gui.Parent do
+        if loopMode then
+            pcall(loopTick)
+        end
+        task.wait(1.5)
+    end
+end)
+
+task.spawn(function()
+    task.wait(0.5)
+    pcall(updateInventory)
+end)
+
+print("[BPFiller] Loaded.")
