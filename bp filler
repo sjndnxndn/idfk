@@ -7,7 +7,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local RS2 = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
@@ -233,7 +232,7 @@ local function collectBlueprints()
     return list
 end
 
--- ─────────── NEW KRON HUB STYLE UI ───────────
+-- ─────────── KRON HUB STYLE UI (SCALED DOWN) ───────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "BPFillerStandalone"
 gui.ResetOnSpawn = false
@@ -252,23 +251,23 @@ local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 -- Floating Toggle Button
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
-toggleBtn.Size = UDim2.fromOffset(50, 50)
-toggleBtn.Position = UDim2.new(1, -70, 0, 20)
+toggleBtn.Size = UDim2.fromOffset(40, 40)
+toggleBtn.Position = UDim2.new(1, -55, 0, 15)
 toggleBtn.BackgroundColor3 = BG_DARK
 toggleBtn.BorderSizePixel = 0
 toggleBtn.Text = "⚙"
 toggleBtn.TextColor3 = TEXT_WHITE
-toggleBtn.TextSize = 24
+toggleBtn.TextSize = 20
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.ZIndex = 100
 toggleBtn.Parent = gui
-Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 25)
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 20)
 local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
--- Main Panel
-local panelW, panelH = 480, 620
+-- Main Panel (Significantly smaller)
+local panelW, panelH = 320, 420
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -280,105 +279,105 @@ panel.Draggable = true
 panel.ClipsDescendants = true
 panel.Visible = true
 panel.Parent = gui
-Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
 local pStroke = Instance.new("UIStroke", panel)
 pStroke.Color = ACCENT
 pStroke.Thickness = 2
 
 -- Title Bar
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 45)
+titleBar.Size = UDim2.new(1, 0, 0, 36)
 titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 titleBar.BorderSizePixel = 0
 titleBar.Parent = panel
-Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
 
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size = UDim2.new(1, -120, 1, 0)
-titleLbl.Position = UDim2.fromOffset(15, 0)
+titleLbl.Size = UDim2.new(1, -100, 1, 0)
+titleLbl.Position = UDim2.fromOffset(12, 0)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Text = "Blueprint Filler"
 titleLbl.TextColor3 = TEXT_WHITE
 titleLbl.Font = Enum.Font.GothamBold
-titleLbl.TextSize = 16
+titleLbl.TextSize = 14
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 titleLbl.Parent = titleBar
 
 local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.fromOffset(30, 30)
-minimizeBtn.Position = UDim2.new(1, -75, 0, 7.5)
+minimizeBtn.Size = UDim2.fromOffset(24, 24)
+minimizeBtn.Position = UDim2.new(1, -60, 0, 6)
 minimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 minimizeBtn.BorderSizePixel = 0
 minimizeBtn.Text = "—"
 minimizeBtn.TextColor3 = TEXT_WHITE
 minimizeBtn.Font = Enum.Font.GothamBold
-minimizeBtn.TextSize = 16
+minimizeBtn.TextSize = 14
 minimizeBtn.Parent = titleBar
-Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 6)
+Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 5)
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(30, 30)
-closeBtn.Position = UDim2.new(1, -40, 0, 7.5)
+closeBtn.Size = UDim2.fromOffset(24, 24)
+closeBtn.Position = UDim2.new(1, -32, 0, 6)
 closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 closeBtn.BorderSizePixel = 0
 closeBtn.Text = "X"
 closeBtn.TextColor3 = TEXT_WHITE
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
+closeBtn.TextSize = 12
 closeBtn.Parent = titleBar
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
 -- Scrolling Body
 local body = Instance.new("ScrollingFrame")
-body.Size = UDim2.new(1, -20, 1, -60)
-body.Position = UDim2.fromOffset(10, 50)
+body.Size = UDim2.new(1, -16, 1, -46)
+body.Position = UDim2.fromOffset(8, 40)
 body.BackgroundTransparency = 1
 body.BorderSizePixel = 0
-body.ScrollBarThickness = 6
+body.ScrollBarThickness = 4
 body.ScrollBarImageColor3 = ACCENT
 body.CanvasSize = UDim2.new(0, 0, 0, 0)
 body.AutomaticCanvasSize = Enum.AutomaticSize.Y
 body.Parent = panel
 
 local layout = Instance.new("UIListLayout", body)
-layout.Padding = UDim.new(0, 8)
+layout.Padding = UDim.new(0, 6)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local padding = Instance.new("UIPadding", body)
-padding.PaddingTop = UDim.new(0, 10)
-padding.PaddingBottom = UDim.new(0, 10)
+padding.PaddingTop = UDim.new(0, 6)
+padding.PaddingBottom = UDim.new(0, 6)
 
 -- Resize Handle
 local resizeHandle = Instance.new("TextButton")
-resizeHandle.Size = UDim2.fromOffset(20, 20)
-resizeHandle.Position = UDim2.new(1, -25, 1, -25)
+resizeHandle.Size = UDim2.fromOffset(16, 16)
+resizeHandle.Position = UDim2.new(1, -20, 1, -20)
 resizeHandle.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 resizeHandle.BorderSizePixel = 0
 resizeHandle.Text = ""
 resizeHandle.AutoButtonColor = false
 resizeHandle.ZIndex = 60
 resizeHandle.Parent = panel
-Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 5)
+Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 4)
 
 for i = 1, 3 do
     local line = Instance.new("Frame")
-    line.Size = UDim2.fromOffset(10 - i * 2, 1)
-    line.Position = UDim2.fromOffset(4, 5 + i * 3)
+    line.Size = UDim2.fromOffset(8 - i * 2, 1)
+    line.Position = UDim2.fromOffset(3, 4 + i * 3)
     line.BackgroundColor3 = TEXT_GRAY
     line.BorderSizePixel = 0
     line.Parent = resizeHandle
 end
 
--- ─────────── UI FACTORY HELPERS ───────────
-local ROW_SECTION  = 26
-local ROW_PARA     = 48
-local ROW_BTN      = 42
-local ROW_BTN_DESC = 56
-local ROW_TOGGLE   = 44
-local ROW_TOG_DESC = 56
-local ROW_INPUT    = 42
-local ROW_SLIDER   = 56
-local ROW_DROPDOWN = 48
+-- ─────────── UI FACTORY HELPERS (SCALED DOWN) ───────────
+local ROW_SECTION  = 20
+local ROW_PARA     = 38
+local ROW_BTN      = 34
+local ROW_BTN_DESC = 46
+local ROW_TOGGLE   = 34
+local ROW_TOG_DESC = 46
+local ROW_INPUT    = 34
+local ROW_SLIDER   = 44
+local ROW_DROPDOWN = 38
 
 local function makeSection(text, order)
     local lbl = Instance.new("TextLabel")
@@ -387,7 +386,7 @@ local function makeSection(text, order)
     lbl.Text = "  " .. text
     lbl.TextColor3 = ACCENT
     lbl.Font = Enum.Font.GothamBold
-    lbl.TextSize = 12
+    lbl.TextSize = 11
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.LayoutOrder = order
     lbl.Parent = body
@@ -401,27 +400,27 @@ local function makeParagraph(title, desc, order, color)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -16, 0, 18)
-    t.Position = UDim2.fromOffset(8, 5)
+    t.Size = UDim2.new(1, -12, 0, 14)
+    t.Position = UDim2.fromOffset(6, 4)
     t.BackgroundTransparency = 1
     t.Text = title
     t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
-    t.TextSize = 12
+    t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     local d = Instance.new("TextLabel")
-    d.Size = UDim2.new(1, -16, 0, 22)
-    d.Position = UDim2.fromOffset(8, 22)
+    d.Size = UDim2.new(1, -12, 0, 18)
+    d.Position = UDim2.fromOffset(6, 18)
     d.BackgroundTransparency = 1
     d.Text = desc
     d.TextColor3 = color or TEXT_GRAY
     d.Font = Enum.Font.Gotham
-    d.TextSize = 11
+    d.TextSize = 9
     d.TextXAlignment = Enum.TextXAlignment.Left
     d.TextWrapped = true
     d.Parent = frame
@@ -438,31 +437,31 @@ local function makeButton(text, desc, onClick, order)
     btn.AutoButtonColor = true
     btn.LayoutOrder = order
     btn.Parent = body
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     local stroke = Instance.new("UIStroke", btn)
     stroke.Color = Color3.fromRGB(50, 50, 65)
     stroke.Thickness = 1
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -16, 0, 18)
-    t.Position = UDim2.fromOffset(8, desc and 5 or 12)
+    t.Size = UDim2.new(1, -12, 0, 14)
+    t.Position = UDim2.fromOffset(6, desc and 4 or 10)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamBold
-    t.TextSize = 12
+    t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = btn
 
     if desc then
         local d = Instance.new("TextLabel")
-        d.Size = UDim2.new(1, -16, 0, 24)
-        d.Position = UDim2.fromOffset(8, 24)
+        d.Size = UDim2.new(1, -12, 0, 18)
+        d.Position = UDim2.fromOffset(6, 20)
         d.BackgroundTransparency = 1
         d.Text = desc
         d.TextColor3 = TEXT_GRAY
         d.Font = Enum.Font.Gotham
-        d.TextSize = 10
+        d.TextSize = 9
         d.TextXAlignment = Enum.TextXAlignment.Left
         d.TextWrapped = true
         d.Parent = btn
@@ -482,28 +481,28 @@ local function makeToggle(text, desc, default, onChange, order)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -70, 0, 18)
-    t.Position = UDim2.fromOffset(8, desc and 5 or 13)
+    t.Size = UDim2.new(1, -60, 0, 14)
+    t.Position = UDim2.fromOffset(6, desc and 4 or 10)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
-    t.TextSize = 12
+    t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     if desc then
         local d = Instance.new("TextLabel")
-        d.Size = UDim2.new(1, -70, 0, 24)
-        d.Position = UDim2.fromOffset(8, 24)
+        d.Size = UDim2.new(1, -60, 0, 18)
+        d.Position = UDim2.fromOffset(6, 20)
         d.BackgroundTransparency = 1
         d.Text = desc
         d.TextColor3 = TEXT_GRAY
         d.Font = Enum.Font.Gotham
-        d.TextSize = 10
+        d.TextSize = 9
         d.TextXAlignment = Enum.TextXAlignment.Left
         d.TextWrapped = true
         d.Parent = frame
@@ -511,26 +510,26 @@ local function makeToggle(text, desc, default, onChange, order)
 
     local state = default
     local switch = Instance.new("TextButton")
-    switch.Size = UDim2.fromOffset(48, 26)
-    switch.Position = UDim2.new(1, -56, 0.5, -13)
+    switch.Size = UDim2.fromOffset(40, 22)
+    switch.Position = UDim2.new(1, -46, 0.5, -11)
     switch.BackgroundColor3 = state and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(45, 45, 55)
     switch.BorderSizePixel = 0
     switch.Text = ""
     switch.Parent = frame
-    Instance.new("UICorner", switch).CornerRadius = UDim.new(0, 13)
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(0, 11)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(20, 20)
-    knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
+    knob.Size = UDim2.fromOffset(16, 16)
+    knob.Position = state and UDim2.new(1, -18, 0, 3) or UDim2.fromOffset(3, 3)
     knob.BackgroundColor3 = TEXT_WHITE
     knob.BorderSizePixel = 0
     knob.Parent = switch
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 10)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 8)
 
     local function setState(v)
         state = v
         switch.BackgroundColor3 = state and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(45, 45, 55)
-        knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
+        knob.Position = state and UDim2.new(1, -18, 0, 3) or UDim2.fromOffset(3, 3)
     end
 
     switch.MouseButton1Click:Connect(function()
@@ -548,32 +547,32 @@ local function makeInput(text, default, onChange, order)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(110, ROW_INPUT)
-    t.Position = UDim2.fromOffset(8, 0)
+    t.Size = UDim2.fromOffset(90, ROW_INPUT)
+    t.Position = UDim2.fromOffset(6, 0)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
-    t.TextSize = 12
+    t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, -130, 0, 30)
-    box.Position = UDim2.new(0, 118, 0.5, -15)
+    box.Size = UDim2.new(1, -108, 0, 26)
+    box.Position = UDim2.new(0, 100, 0.5, -13)
     box.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     box.BorderSizePixel = 0
     box.Text = tostring(default)
     box.TextColor3 = TEXT_WHITE
     box.Font = Enum.Font.GothamMedium
-    box.TextSize = 13
+    box.TextSize = 12
     box.ClearTextOnFocus = false
     box.TextXAlignment = Enum.TextXAlignment.Left
     box.Parent = frame
-    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 5)
     local bs = Instance.new("UIStroke", box)
     bs.Color = Color3.fromRGB(60, 60, 75)
     bs.Thickness = 1
@@ -592,53 +591,53 @@ local function makeSlider(text, min, max, default, onChange, order)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -70, 0, 18)
-    t.Position = UDim2.fromOffset(8, 5)
+    t.Size = UDim2.new(1, -60, 0, 14)
+    t.Position = UDim2.fromOffset(6, 4)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
-    t.TextSize = 12
+    t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     local valLbl = Instance.new("TextLabel")
-    valLbl.Size = UDim2.fromOffset(60, 18)
-    valLbl.Position = UDim2.new(1, -68, 0, 5)
+    valLbl.Size = UDim2.fromOffset(50, 14)
+    valLbl.Position = UDim2.new(1, -56, 0, 4)
     valLbl.BackgroundTransparency = 1
     valLbl.Text = tostring(default)
     valLbl.TextColor3 = ACCENT
     valLbl.Font = Enum.Font.GothamBold
-    valLbl.TextSize = 12
+    valLbl.TextSize = 11
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
     valLbl.Parent = frame
 
     local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, -16, 0, 8)
-    track.Position = UDim2.fromOffset(8, 38)
+    track.Size = UDim2.new(1, -12, 0, 6)
+    track.Position = UDim2.fromOffset(6, 30)
     track.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     track.BorderSizePixel = 0
     track.Parent = frame
-    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 3)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
     fill.BackgroundColor3 = ACCENT
     fill.BorderSizePixel = 0
     fill.Parent = track
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(18, 18)
+    knob.Size = UDim2.fromOffset(14, 14)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
     knob.BackgroundColor3 = TEXT_WHITE
     knob.BorderSizePixel = 0
     knob.Parent = track
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 9)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 7)
 
     local dragging = false
 
@@ -695,52 +694,52 @@ local function makeDropdown(text, values, default, onChange, order)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
     frame.Parent = body
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(110, ROW_DROPDOWN)
-    t.Position = UDim2.fromOffset(8, 0)
+    t.Size = UDim2.fromOffset(90, ROW_DROPDOWN)
+    t.Position = UDim2.fromOffset(6, 0)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
     t.Font = Enum.Font.GothamMedium
-    t.TextSize = 12
+    t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = frame
 
     local sel = Instance.new("TextButton")
-    sel.Size = UDim2.new(1, -130, 0, 32)
-    sel.Position = UDim2.new(0, 118, 0.5, -16)
+    sel.Size = UDim2.new(1, -108, 0, 26)
+    sel.Position = UDim2.new(0, 100, 0.5, -13)
     sel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     sel.BorderSizePixel = 0
     sel.Text = ""
     sel.AutoButtonColor = true
     sel.TextXAlignment = Enum.TextXAlignment.Left
     sel.Parent = frame
-    Instance.new("UICorner", sel).CornerRadius = UDim.new(0, 6)
+    Instance.new("UICorner", sel).CornerRadius = UDim.new(0, 5)
     local ss = Instance.new("UIStroke", sel)
     ss.Color = Color3.fromRGB(60, 60, 75)
     ss.Thickness = 1
 
     local selLbl = Instance.new("TextLabel")
-    selLbl.Size = UDim2.new(1, -26, 1, 0)
-    selLbl.Position = UDim2.fromOffset(10, 0)
+    selLbl.Size = UDim2.new(1, -22, 1, 0)
+    selLbl.Position = UDim2.fromOffset(8, 0)
     selLbl.BackgroundTransparency = 1
     selLbl.Text = tostring(default)
     selLbl.TextColor3 = TEXT_WHITE
     selLbl.Font = Enum.Font.GothamMedium
-    selLbl.TextSize = 13
+    selLbl.TextSize = 12
     selLbl.TextXAlignment = Enum.TextXAlignment.Left
     selLbl.Parent = sel
 
     local arrow = Instance.new("TextLabel")
-    arrow.Size = UDim2.fromOffset(20, 32)
-    arrow.Position = UDim2.new(1, -22, 0, 0)
+    arrow.Size = UDim2.fromOffset(18, 26)
+    arrow.Position = UDim2.new(1, -20, 0, 0)
     arrow.BackgroundTransparency = 1
     arrow.Text = "v"
     arrow.TextColor3 = TEXT_GRAY
     arrow.Font = Enum.Font.GothamBold
-    arrow.TextSize = 11
+    arrow.TextSize = 10
     arrow.Parent = sel
 
     local currentValues = values
@@ -763,7 +762,7 @@ local function makeDropdown(text, values, default, onChange, order)
         listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
         listFrame.BorderSizePixel = 0
         listFrame.ZIndex = 1000
-        listFrame.ScrollBarThickness = 5
+        listFrame.ScrollBarThickness = 4
         listFrame.ScrollBarImageColor3 = ACCENT
         listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
         listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -771,10 +770,10 @@ local function makeDropdown(text, values, default, onChange, order)
         
         local ap = sel.AbsolutePosition
         listFrame.Position = UDim2.fromOffset(ap.X, ap.Y + sel.AbsoluteSize.Y + 2)
-        listFrame.Size = UDim2.fromOffset(sel.AbsoluteSize.X, math.min(#currentValues * 28 + 8, 200))
+        listFrame.Size = UDim2.fromOffset(sel.AbsoluteSize.X, math.min(#currentValues * 24 + 6, 160))
         
         listFrame.Parent = gui
-        Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 6)
+        Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 5)
         local ls = Instance.new("UIStroke", listFrame)
         ls.Color = ACCENT
         ls.Thickness = 1
@@ -786,13 +785,13 @@ local function makeDropdown(text, values, default, onChange, order)
 
         for _, v in ipairs(currentValues) do
             local item = Instance.new("TextButton")
-            item.Size = UDim2.new(1, -8, 0, 24)
+            item.Size = UDim2.new(1, -6, 0, 22)
             item.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
             item.BorderSizePixel = 0
             item.Text = tostring(v)
             item.TextColor3 = TEXT_WHITE
             item.Font = Enum.Font.GothamMedium
-            item.TextSize = 12
+            item.TextSize = 11
             item.Parent = listFrame
             Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
             
@@ -1212,11 +1211,9 @@ local function togglePanel()
     if minimized then
         savedSize = panel.Size
         panel.Visible = false
-        toggleBtn.Text = "⚙"
     else
         panel.Visible = true
         panel.Size = savedSize
-        toggleBtn.Text = "⚙"
     end
 end
 
@@ -1226,7 +1223,6 @@ minimizeBtn.MouseButton1Click:Connect(function()
     minimized = true
     savedSize = panel.Size
     panel.Visible = false
-    toggleBtn.Text = "⚙"
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
@@ -1254,7 +1250,8 @@ UIS.InputChanged:Connect(function(input)
         local cur = UIS:GetMouseLocation()
         local dx = cur.X - resizeStartMouse.X
         local dy = cur.Y - resizeStartMouse.Y
-        local newW = math.clamp(resizeStartSize.X + dx, 300, 700)
+        -- Allow resizing from 260x300 up to 700x900
+        local newW = math.clamp(resizeStartSize.X + dx, 260, 700)
         local newH = math.clamp(resizeStartSize.Y + dy, 300, 900)
         panel.Size = UDim2.fromOffset(newW, newH)
     end
@@ -1271,7 +1268,7 @@ end)
 local function onViewportChange()
     local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
     if not vp then return end
-    local w, h = 480, 620
+    local w, h = 320, 420
     local curW = panel.AbsoluteSize.X
     local curH = panel.AbsoluteSize.Y
     if curW > w or curH > h then
