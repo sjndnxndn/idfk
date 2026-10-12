@@ -18,6 +18,7 @@ local filterMinY        = 0
 local filterMaxY        = 1000
 local selectedTreeClass = nil
 local selectedPlayer    = plr
+local selectedWoodOwner = plr   -- NEW
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -64,8 +65,9 @@ local function ownerMatches(model, who)
     return false
 end
 
-local function isMine(model)
-    return ownerMatches(model, plr)
+-- Checks against selected wood owner (was isMine)
+local function isSelectedWoodOwner(model)
+    return ownerMatches(model, selectedWoodOwner)
 end
 
 local function isLoosePlank(model)
@@ -73,7 +75,7 @@ local function isLoosePlank(model)
     if model.Name ~= "Plank" then return false end
     if not model:FindFirstChild("TreeClass") then return false end
     if not model:FindFirstChildWhichIsA("BasePart") then return false end
-    if not isMine(model) then return false end
+    if not isSelectedWoodOwner(model) then return false end
     return true
 end
 
@@ -248,7 +250,6 @@ local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 
--- Floating Toggle Button
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
 toggleBtn.Size = UDim2.fromOffset(40, 40)
@@ -266,7 +267,6 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
--- Main Panel (Significantly smaller)
 local panelW, panelH = 320, 420
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
@@ -284,7 +284,6 @@ local pStroke = Instance.new("UIStroke", panel)
 pStroke.Color = ACCENT
 pStroke.Thickness = 2
 
--- Title Bar
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 36)
 titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
@@ -327,7 +326,6 @@ closeBtn.TextSize = 12
 closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
--- Scrolling Body
 local body = Instance.new("ScrollingFrame")
 body.Size = UDim2.new(1, -16, 1, -46)
 body.Position = UDim2.fromOffset(8, 40)
@@ -347,7 +345,6 @@ local padding = Instance.new("UIPadding", body)
 padding.PaddingTop = UDim.new(0, 6)
 padding.PaddingBottom = UDim.new(0, 6)
 
--- Resize Handle
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(16, 16)
 resizeHandle.Position = UDim2.new(1, -20, 1, -20)
@@ -368,7 +365,6 @@ for i = 1, 3 do
     line.Parent = resizeHandle
 end
 
--- ─────────── UI FACTORY HELPERS (SCALED DOWN) ───────────
 local ROW_SECTION  = 20
 local ROW_PARA     = 38
 local ROW_BTN      = 34
@@ -841,6 +837,7 @@ local inventoryPara = nil
 local treeLabelPara = nil
 local woodTypeDropdown = nil
 local playerDropdown = nil
+local woodOwnerDropdown = nil   -- NEW
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -902,7 +899,7 @@ local function fillAllBlueprints()
 
     local pl = collectMatchingPlanks()
     if #pl == 0 then
-        setStatus("No matching planks (check filter / wood type)")
+        setStatus("No matching planks (check filter / wood type / wood owner)")
         return
     end
 
@@ -914,7 +911,7 @@ local function fillAllBlueprints()
 
     autoFillRunning = true
     autoFillCancel = false
-    setStatus(string.format("Auto fill for %s: %d bps, %d planks", selectedPlayer.Name, #bps, #pl))
+    setStatus(string.format("Fill: %d bps, %d planks (wood: %s)", #bps, #pl, selectedWoodOwner.Name))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -1063,7 +1060,7 @@ local function startPickMode()
         while node and node.Parent ~= pm do node = node.Parent end
         if not node or not pm then stopPickMode(); return end
         if not isLoosePlank(node) then
-            setStatus("Not your loose plank")
+            setStatus("Not a matching plank")
             stopPickMode(); return
         end
         local tc = plankTreeClass(node)
@@ -1110,6 +1107,10 @@ local function updateInventory()
     if playerDropdown then
         pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
     end
+
+    if woodOwnerDropdown then
+        pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
+    end
 end
 
 -- ─────────── BUILD THE UI ───────────
@@ -1131,14 +1132,25 @@ treeLabelPara = makeParagraph("Selected Wood Type", "None (all types)", nextOrde
 
 makeSection("TARGET", nextOrder())
 
-playerDropdown = makeDropdown("Player", getPlayerOptions(), "(Me)", function(opt)
+playerDropdown = makeDropdown("Blueprint Owner", getPlayerOptions(), "(Me)", function(opt)
     if opt == "(Me)" then
         selectedPlayer = plr
     else
         local found = Players:FindFirstChild(opt)
         selectedPlayer = found or plr
     end
-    setStatus("Target player: " .. selectedPlayer.Name)
+    setStatus("Blueprint owner: " .. selectedPlayer.Name)
+end, nextOrder())
+
+-- NEW: Wood Owner dropdown
+woodOwnerDropdown = makeDropdown("Wood Owner", getPlayerOptions(), "(Me)", function(opt)
+    if opt == "(Me)" then
+        selectedWoodOwner = plr
+    else
+        local found = Players:FindFirstChild(opt)
+        selectedWoodOwner = found or plr
+    end
+    setStatus("Wood owner: " .. selectedWoodOwner.Name)
 end, nextOrder())
 
 woodTypeDropdown = makeDropdown("Wood Type", getWoodTypeOptions(nil), "(All)", function(opt)
@@ -1250,7 +1262,6 @@ UIS.InputChanged:Connect(function(input)
         local cur = UIS:GetMouseLocation()
         local dx = cur.X - resizeStartMouse.X
         local dy = cur.Y - resizeStartMouse.Y
-        -- Allow resizing from 260x300 up to 700x900
         local newW = math.clamp(resizeStartSize.X + dx, 260, 700)
         local newH = math.clamp(resizeStartSize.Y + dy, 300, 900)
         panel.Size = UDim2.fromOffset(newW, newH)
@@ -1264,7 +1275,6 @@ UIS.InputEnded:Connect(function(input)
     end
 end)
 
--- ─────────── VIEWPORT CHANGE ───────────
 local function onViewportChange()
     local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
     if not vp then return end
@@ -1292,6 +1302,9 @@ Players.PlayerAdded:Connect(function()
     if playerDropdown then
         pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
     end
+    if woodOwnerDropdown then
+        pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
+    end
 end)
 
 Players.PlayerRemoving:Connect(function(p)
@@ -1301,8 +1314,17 @@ Players.PlayerRemoving:Connect(function(p)
             pcall(function() playerDropdown:Set("(Me)") end)
         end
     end
+    if selectedWoodOwner == p then
+        selectedWoodOwner = plr
+        if woodOwnerDropdown then
+            pcall(function() woodOwnerDropdown:Set("(Me)") end)
+        end
+    end
     if playerDropdown then
         pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
+    end
+    if woodOwnerDropdown then
+        pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
     end
 end)
 
