@@ -1,10 +1,10 @@
--- v0.1
+-- v0.2
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.1"
+local VERSION = "0.2"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -31,23 +31,17 @@ local selectedTreeClass = nil
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
 
+-- Fill method: "Working" (old teleport/release) or "Testing/WIP" (hold)
+local fillMethod        = "Working"
+local fillMethodLabels  = { "Working (teleport)", "Testing/WIP (hold)" }
+
 local heldPlanks         = {}
 local HOLD_FIRE_INTERVAL = 0.1
 local fireEveryFrame     = false
 local fireOnceOnly       = false
 
--- Fire signature mode: which args to send to ClientIsDragging:FireServer
--- 1 = (model)
--- 2 = (model, cframe)          <-- user-requested variant
--- 3 = (model, cframe, true)
--- 4 = (model, vector3)
--- 5 = (model, mouse.Hit)
+-- Fire signature: 1..5
 local fireSignature = 2
-
--- Per-mode hold toggles
-local autoFillHold = true
-local loopHold     = true
-local clickHold    = true
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -148,8 +142,6 @@ local function blueprintCenter(model)
 end
 
 -- ─────────── FIRE SIGNATURES ───────────
--- The remote might expect different argument shapes. This dispatcher
--- tries whatever the user selected via the Fire Signature dropdown.
 local SIGNATURE_LABELS = {
     [1] = "Model only",
     [2] = "Model + CFrame",
@@ -163,21 +155,16 @@ local function fireDrag(model, goalCF)
 
     if fireSignature == 1 then
         pcall(function() ClientIsDragging:FireServer(model) end)
-
     elseif fireSignature == 2 then
         pcall(function() ClientIsDragging:FireServer(model, goalCF) end)
-
     elseif fireSignature == 3 then
         pcall(function() ClientIsDragging:FireServer(model, goalCF, true) end)
-
     elseif fireSignature == 4 then
         local pos = goalCF and goalCF.Position or Vector3.zero
         pcall(function() ClientIsDragging:FireServer(model, pos) end)
-
     elseif fireSignature == 5 then
         local hit = Mouse.Hit
         pcall(function() ClientIsDragging:FireServer(model, hit) end)
-
     else
         pcall(function() ClientIsDragging:FireServer(model) end)
     end
@@ -229,7 +216,6 @@ local function quickGrab(model, timeout)
         pcall(function() startVal = lastInteracted.Value end)
     end
 
-    -- Grab with model-only signature (this is what normally triggers ownership)
     local deadline = tick() + timeout
     while tick() < deadline do
         if not model.Parent then return false end
@@ -255,6 +241,7 @@ local function movePlayerNear(root, targetPart)
     end
 end
 
+-- WORKING mode: teleport and release (the old way)
 local function teleportInBlueprint(bp, plankEntry, root)
     if not bp or not bp.Parent then return false, "no bp" end
     if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
@@ -271,9 +258,17 @@ local function teleportInBlueprint(bp, plankEntry, root)
     if plankEntry.part and plankEntry.part.Parent then
         plankEntry.part.CFrame = goalCF
     end
+
+    -- For extra reliability, set CFrame again after a tiny wait so the
+    -- server has a chance to apply the ownership change.
+    task.wait(0.05)
+    if plankEntry.part and plankEntry.part.Parent then
+        plankEntry.part.CFrame = goalCF
+    end
     return true, "teleported"
 end
 
+-- TESTING/WIP mode: grab and keep-holding
 local function holdInBlueprint(bp, plankEntry, root)
     if not bp or not bp.Parent then return false, "no bp" end
     if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
@@ -377,6 +372,7 @@ local BG_DARK = Color3.fromRGB(15, 15, 20)
 local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
+local GOOD = Color3.fromRGB(90, 200, 120)
 
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
@@ -395,7 +391,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 540
+local panelW, panelH = 320, 560
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -1065,6 +1061,10 @@ local function setHoldCount()
     end
 end
 
+local function isHoldMode()
+    return fillMethod == "Testing/WIP"
+end
+
 local function getPlayerOptions()
     local opts = { "(Me)" }
     for _, p in ipairs(Players:GetPlayers()) do
@@ -1107,8 +1107,9 @@ local function getFireSigOptions()
     }
 end
 
-local function doFill(bp, plankEntry, root, useHold)
-    if useHold then
+-- Unified dispatcher — mode decides which underlying fill is used
+local function doFill(bp, plankEntry, root)
+    if isHoldMode() then
         return holdInBlueprint(bp, plankEntry, root)
     else
         return teleportInBlueprint(bp, plankEntry, root)
@@ -1136,13 +1137,14 @@ local function fillAllBlueprints()
 
     autoFillRunning = true
     autoFillCancel = false
-    local mode = autoFillHold and "HOLD" or "TP"
-    setStatus(string.format("Auto Fill [%s]: %d bps, %d planks", mode, #bps, #pl))
+    local tag = isHoldMode() and "HOLD" or "TP"
+    setStatus(string.format("Auto Fill [%s]: %d bps, %d planks", tag, #bps, #pl))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
         local plankIdx = 1
         local filled, failed = 0, 0
+        local usedPlanks = {}   -- for TP mode, don't reuse
 
         for i, bp in ipairs(bps) do
             if autoFillCancel then break end
@@ -1153,12 +1155,14 @@ local function fillAllBlueprints()
                 local e = pl[plankIdx]
                 plankIdx = (plankIdx % #pl) + 1
                 if e.part and e.part.Parent then
-                    if autoFillHold then
+                    if isHoldMode() then
                         if not heldPlanks[e.model] then
                             plankEntry = e; break
                         end
                     else
-                        plankEntry = e; break
+                        if not usedPlanks[e.model] then
+                            plankEntry = e; break
+                        end
                     end
                 end
             end
@@ -1166,9 +1170,10 @@ local function fillAllBlueprints()
                 setStatus("Ran out of planks")
                 break
             end
+            usedPlanks[plankEntry.model] = true
 
-            setStatus(string.format("%s %d/%d (%s)", mode, i, #bps, bp.Name))
-            local ok = doFill(bp, plankEntry, root, autoFillHold)
+            setStatus(string.format("%s %d/%d (%s)", tag, i, #bps, bp.Name))
+            local ok = doFill(bp, plankEntry, root)
             if ok then filled += 1 else failed += 1 end
             setHoldCount()
             task.wait(fillDelay)
@@ -1195,7 +1200,7 @@ local function loopTick()
         local pl = collectMatchingPlanks()
         local plankIdx = 1
         local filled = 0
-        local mode = loopHold and "HOLD" or "TP"
+        local tag = isHoldMode() and "HOLD" or "TP"
 
         for _, bp in ipairs(bps) do
             if not loopMode then break end
@@ -1205,7 +1210,7 @@ local function loopTick()
                 local e = pl[plankIdx]
                 plankIdx = (plankIdx % math.max(1, #pl)) + 1
                 if e.part and e.part.Parent then
-                    if loopHold then
+                    if isHoldMode() then
                         if not heldPlanks[e.model] then
                             plankEntry = e; break
                         end
@@ -1215,8 +1220,8 @@ local function loopTick()
                 end
             end
             if not plankEntry then break end
-            setStatus(string.format("Loop [%s]: %s", mode, bp.Name))
-            if doFill(bp, plankEntry, root, loopHold) then filled += 1 end
+            setStatus(string.format("Loop [%s]: %s", tag, bp.Name))
+            if doFill(bp, plankEntry, root) then filled += 1 end
             setHoldCount()
             task.wait(fillDelay)
         end
@@ -1256,10 +1261,10 @@ local function startClickMode()
         end
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
         local entry = pl[1]
-        local mode = clickHold and "HOLD" or "TP"
-        setStatus(string.format("Click [%s]: %s", mode, node.Name))
+        local tag = isHoldMode() and "HOLD" or "TP"
+        setStatus(string.format("Click [%s]: %s", tag, node.Name))
         task.spawn(function()
-            local ok = doFill(node, entry, root, clickHold)
+            local ok = doFill(node, entry, root)
             setHoldCount()
             if ok then setStatus("Filled " .. node.Name)
             else setStatus("Fill failed") end
@@ -1336,6 +1341,23 @@ end
 local order = 0
 local function nextOrder() order += 1; return order end
 
+-- Fill method dropdown — the very top control
+makeSection("FILL METHOD", nextOrder())
+
+local methodDropdown = makeDropdown("Mode", fillMethodLabels, "Working (teleport)", function(opt)
+    if opt == "Working (teleport)" then
+        fillMethod = "Working"
+        setStatus("Mode: Working (teleport)")
+    else
+        fillMethod = "Testing/WIP"
+        setStatus("Mode: Testing/WIP (hold)")
+    end
+end, nextOrder())
+
+makeParagraph("Mode Info",
+    "Working = old teleport-and-release. Testing/WIP = experimental hold (may not work).",
+    nextOrder())
+
 makeSection("TARGET", nextOrder())
 
 playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(), "(Me)", function(opt)
@@ -1378,16 +1400,8 @@ makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end
 makeSection("MODES", nextOrder())
 
 makeButton("Auto Fill All",
-    "One-shot fill of every target blueprint",
+    "One-shot fill of every target blueprint using the current mode",
     function() fillAllBlueprints() end, nextOrder())
-
-makeToggle("  ↳ Auto Fill uses HOLD",
-    "ON = keep planks held inside blueprints. OFF = teleport and release.",
-    true,
-    function(state)
-        autoFillHold = state
-        setStatus("Auto Fill: " .. (state and "HOLD" or "TP"))
-    end, nextOrder())
 
 makeToggle("Loop Mode",
     "Continuously fill blueprints as new planks appear",
@@ -1395,14 +1409,6 @@ makeToggle("Loop Mode",
     function(state)
         loopMode = state
         setStatus(state and "Loop ON" or "Loop OFF")
-    end, nextOrder())
-
-makeToggle("  ↳ Loop uses HOLD",
-    "ON = keep planks held. OFF = teleport and release.",
-    true,
-    function(state)
-        loopHold = state
-        setStatus("Loop: " .. (state and "HOLD" or "TP"))
     end, nextOrder())
 
 clickToggleHandle = makeToggle("Click to Fill",
@@ -1413,18 +1419,10 @@ clickToggleHandle = makeToggle("Click to Fill",
         setStatus(state and "Click ON" or "Click OFF")
     end, nextOrder())
 
-makeToggle("  ↳ Click uses HOLD",
-    "ON = keep plank held. OFF = teleport and release.",
-    true,
-    function(state)
-        clickHold = state
-        setStatus("Click: " .. (state and "HOLD" or "TP"))
-    end, nextOrder())
-
 holdCountPara = makeParagraph("Held Planks", "Currently holding: 0 planks", nextOrder())
 
 makeButton("Release All",
-    "Stop holding every plank",
+    "Stop holding every plank (only matters in Testing/WIP mode)",
     function()
         local count = holdCount()
         stopAllHolds()
@@ -1432,7 +1430,7 @@ makeButton("Release All",
         setStatus("Released " .. count .. " plank(s)")
     end, nextOrder())
 
-makeSection("HOLD TUNING", nextOrder())
+makeSection("HOLD TUNING (WIP ONLY)", nextOrder())
 
 fireSigDropdown = makeDropdown("Fire Signature", getFireSigOptions(), "2) Model + CFrame", function(opt)
     local n = tonumber(string.match(opt, "^(%d+)"))
@@ -1474,7 +1472,7 @@ end, nextOrder())
 
 makeSection("STATUS", nextOrder())
 
-statusPara = makeParagraph("Status", "Ready", nextOrder())
+statusPara = makeParagraph("Status", "Ready - mode: Working (teleport)", nextOrder())
 
 -- ─────────── MIN / CLOSE / RESIZE ───────────
 local minimized = false
@@ -1578,4 +1576,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] v" .. VERSION .. " loaded. Fire signature default: Model + CFrame.")
+print("[BPFiller] v" .. VERSION .. " loaded. Default mode: Working (teleport).")
