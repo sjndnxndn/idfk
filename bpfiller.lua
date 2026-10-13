@@ -1,10 +1,10 @@
--- v0.7
+-- v0.8
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.7"
+local VERSION = "0.8"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -68,6 +68,9 @@ if Interaction then
 end
 
 -- ─────────── DRAG SNIFFER ───────────
+-- IMPORTANT: The sniffer is NOT installed by default.
+-- Hooking game.__namecall interferes with RemoteEvent:FireServer on Delta.
+-- Only install it when you explicitly want to sniff.
 _G._BPFDragSniffing = false
 _G._BPFSnifferInstalled = false
 _G._BPFOriginalNamecall = nil
@@ -95,8 +98,11 @@ local function installDragSniffer()
         local ok, err = pcall(function()
             local oldNamecall
             oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                if not _G._BPFDragSniffing then
+                    return oldNamecall(self, ...)
+                end
                 local method = getnamecallmethod()
-                if _G._BPFDragSniffing and self == ClientIsDragging then
+                if self == ClientIsDragging then
                     logArgs("ClientIsDragging:" .. tostring(method), { ... })
                 end
                 return oldNamecall(self, ...)
@@ -107,10 +113,8 @@ local function installDragSniffer()
             _G._BPFSnifferInstalled = true
             return true, "hookmetamethod (__namecall)"
         else
-            print("[Sniffer] hookmetamethod failed: " .. tostring(err))
+            return false, "hookmetamethod failed: " .. tostring(err)
         end
-    else
-        print("[Sniffer] hookmetamethod not available")
     end
 
     if type(getrawmetatable) == "function" then
@@ -119,8 +123,11 @@ local function installDragSniffer()
             local oldNamecall = mt.__namecall
             if setreadonly then setreadonly(mt, false) end
             mt.__namecall = function(self, ...)
+                if not _G._BPFDragSniffing then
+                    return oldNamecall(self, ...)
+                end
                 local method = getnamecallmethod and getnamecallmethod() or ""
-                if _G._BPFDragSniffing and self == ClientIsDragging then
+                if self == ClientIsDragging then
                     logArgs("ClientIsDragging:" .. tostring(method), { ... })
                 end
                 return oldNamecall(self, ...)
@@ -132,24 +139,18 @@ local function installDragSniffer()
             _G._BPFSnifferInstalled = true
             return true, "getrawmetatable (__namecall)"
         else
-            print("[Sniffer] getrawmetatable failed: " .. tostring(err))
+            return false, "getrawmetatable failed: " .. tostring(err)
         end
-    else
-        print("[Sniffer] getrawmetatable not available")
     end
 
-    return false, "no hook method available in this executor"
+    return false, "no hook method available"
 end
 
 local function reportCapabilities()
     local lines = {}
     local function chk(name)
         local t = type(_G[name])
-        if t == "function" then
-            table.insert(lines, name .. " = YES")
-        else
-            table.insert(lines, name .. " = no")
-        end
+        table.insert(lines, name .. " = " .. (t == "function" and "YES" or "no"))
     end
     chk("hookmetamethod")
     chk("hookfunction")
@@ -157,7 +158,6 @@ local function reportCapabilities()
     chk("setreadonly")
     chk("getnamecallmethod")
     chk("newcclosure")
-    chk("getgenv")
     print("=== Executor Capabilities ===")
     for _, l in ipairs(lines) do print("  " .. l) end
     print("=============================")
@@ -1614,36 +1614,38 @@ makeToggle("Fire Once Only",
 makeSection("DEBUG / SNIFFER", nextOrder())
 
 local sniffStatusPara = nil
-local sniffResult = { installDragSniffer() }
 sniffStatusPara = makeParagraph("Sniffer Status",
-    (sniffResult[1] and "Installed: " or "FAILED: ") .. tostring(sniffResult[2]),
+    "Not installed (hooks disabled by default)",
     nextOrder())
 
-makeToggle("Sniff Drag Remote",
-    "When ON, every ClientIsDragging fire gets printed to the UI console",
-    false,
-    function(state)
-        _G._BPFDragSniffing = state
-        if state then
-            print("=== SNIFFER ON ===")
-            print("Manually drag a plank in-game now. Check the console below.")
-            setStatus("Sniffer ON - drag a plank in game now")
-        else
-            print("=== SNIFFER OFF ===")
-            setStatus("Sniffer OFF")
-        end
-    end, nextOrder())
-
-makeButton("Reinstall Sniffer",
-    "Re-hooks ClientIsDragging",
+makeButton("Install Sniffer",
+    "Hook ClientIsDragging for sniffing. WARNING: may break teleport until you rejoin.",
     function()
-        _G._BPFSnifferInstalled = false
         local ok, msg = installDragSniffer()
         pcall(function()
             sniffStatusPara:setDesc(sniffStatusPara,
                 (ok and "Installed: " or "FAILED: ") .. tostring(msg))
         end)
-        setStatus(ok and "Sniffer reinstalled" or ("Sniffer failed: " .. tostring(msg)))
+        setStatus(ok and "Sniffer installed" or ("Sniffer failed: " .. tostring(msg)))
+    end, nextOrder())
+
+makeToggle("Sniff Drag Remote",
+    "Only works after clicking Install Sniffer above",
+    false,
+    function(state)
+        if state and not _G._BPFSnifferInstalled then
+            setStatus("Install the sniffer first")
+            return
+        end
+        _G._BPFDragSniffing = state
+        if state then
+            print("=== SNIFFER ON ===")
+            print("Manually drag a plank in-game now.")
+            setStatus("Sniffer ON")
+        else
+            print("=== SNIFFER OFF ===")
+            setStatus("Sniffer OFF")
+        end
     end, nextOrder())
 
 makeButton("Report Executor Capabilities",
@@ -1855,5 +1857,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] v" .. VERSION .. " loaded.")
-print("[BPFiller] Sniffer status: " .. tostring(sniffResult[2]))
+print("[BPFiller] v" .. VERSION .. " loaded (no hooks installed).")
