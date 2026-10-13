@@ -1,4 +1,4 @@
--- v1.0
+-- v1.0 (Kron v2 UI)
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
@@ -11,6 +11,7 @@ local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local RS2 = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
 
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
@@ -134,7 +135,6 @@ local loopRunning       = false
 local clickMode         = false
 local clickConn         = nil
 local nearestMode       = false
-
 local loopStallCooldown = 0
 
 local SCAN_INTERVAL     = 2
@@ -302,7 +302,7 @@ local function blueprintCenter(model)
     return nil
 end
 
--- ─────────── WORKING: verbatim from original ───────────
+-- ─────────── WORKING ───────────
 local function grabOwnership(model, timeout)
     timeout = timeout or 1.0
     if not model or not model.Parent then return false end
@@ -542,7 +542,7 @@ local function collectBlueprints()
     return list
 end
 
--- ─────────── BASE / NAVIGATION HELPERS ───────────
+-- ─────────── BASE HELPERS ───────────
 local function getBaseOwnerOptions()
     local pm = getPlayerModels()
     local seen = {}
@@ -597,8 +597,6 @@ local function getBasePosition(playerName)
     return sum / #positions
 end
 
--- These are defined early but only called from button handlers,
--- so setStatus (defined later) will exist by the time they run.
 local _setStatusRef = nil
 
 local function tpToClosestBP()
@@ -655,7 +653,7 @@ local function tpToBase()
     if _setStatusRef then _setStatusRef("TP'd to " .. name .. "'s base") end
 end
 
--- ─────────── UI ───────────
+-- ─────────── UI: KRON V2 LAYOUT ───────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "BPFillerStandalone"
 gui.ResetOnSpawn = false
@@ -666,21 +664,26 @@ gui.Parent = plr:WaitForChild("PlayerGui")
 _G._BPFillerGui = gui
 
 local ACCENT = Color3.fromRGB(120, 80, 255)
-local BG_DARK = Color3.fromRGB(15, 15, 20)
-local BG_ROW = Color3.fromRGB(25, 25, 32)
+local ACCENT_SOFT = Color3.fromRGB(80, 55, 180)
+local BG_DARK = Color3.fromRGB(13, 13, 17)
+local BG_SIDEBAR = Color3.fromRGB(18, 18, 24)
+local BG_ROW = Color3.fromRGB(26, 26, 33)
+local BG_ROW_HOVER = Color3.fromRGB(34, 34, 44)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
+local TEXT_DIM = Color3.fromRGB(100, 100, 115)
 local WARN_RED = Color3.fromRGB(230, 120, 120)
 
+-- Floating toggle
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
 toggleBtn.Size = UDim2.fromOffset(40, 40)
 toggleBtn.Position = UDim2.new(1, -55, 0, 15)
 toggleBtn.BackgroundColor3 = BG_DARK
 toggleBtn.BorderSizePixel = 0
-toggleBtn.Text = "⚙"
+toggleBtn.Text = "K"
 toggleBtn.TextColor3 = TEXT_WHITE
-toggleBtn.TextSize = 20
+toggleBtn.TextSize = 18
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.ZIndex = 100
 toggleBtn.Parent = gui
@@ -689,6 +692,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
+-- Fly buttons
 flyUpBtn = Instance.new("TextButton")
 flyUpBtn.Size = UDim2.fromOffset(50, 50)
 flyUpBtn.Position = UDim2.new(1, -70, 1, -130)
@@ -702,9 +706,7 @@ flyUpBtn.ZIndex = 100
 flyUpBtn.Visible = false
 flyUpBtn.Parent = gui
 Instance.new("UICorner", flyUpBtn).CornerRadius = UDim.new(0, 25)
-local fuStroke = Instance.new("UIStroke", flyUpBtn)
-fuStroke.Color = ACCENT
-fuStroke.Thickness = 2
+Instance.new("UIStroke", flyUpBtn).Color = ACCENT
 
 flyDownBtn = Instance.new("TextButton")
 flyDownBtn.Size = UDim2.fromOffset(50, 50)
@@ -719,33 +721,25 @@ flyDownBtn.ZIndex = 100
 flyDownBtn.Visible = false
 flyDownBtn.Parent = gui
 Instance.new("UICorner", flyDownBtn).CornerRadius = UDim.new(0, 25)
-local fdStroke = Instance.new("UIStroke", flyDownBtn)
-fdStroke.Color = ACCENT
-fdStroke.Thickness = 2
+Instance.new("UIStroke", flyDownBtn).Color = ACCENT
 
-flyUpBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        flyUpBtn:SetAttribute("Pressed", true)
-    end
-end)
-flyUpBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        flyUpBtn:SetAttribute("Pressed", false)
-    end
-end)
+for _, btn in ipairs({flyUpBtn, flyDownBtn}) do
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            btn:SetAttribute("Pressed", true)
+        end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            btn:SetAttribute("Pressed", false)
+        end
+    end)
+end
 
-flyDownBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        flyDownBtn:SetAttribute("Pressed", true)
-    end
-end)
-flyDownBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        flyDownBtn:SetAttribute("Pressed", false)
-    end
-end)
-
-local panelW, panelH = 320, 620
+-- Main panel
+local panelW, panelH = 360, 600
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -759,9 +753,10 @@ panel.Visible = true
 panel.Parent = gui
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
 local pStroke = Instance.new("UIStroke", panel)
-pStroke.Color = ACCENT
-pStroke.Thickness = 2
+pStroke.Color = ACCENT_SOFT
+pStroke.Thickness = 1.5
 
+-- Title bar
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 36)
@@ -772,14 +767,25 @@ Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
 
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(1, -100, 1, 0)
-titleLbl.Position = UDim2.fromOffset(12, 0)
+titleLbl.Position = UDim2.fromOffset(14, 0)
 titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "Blueprint Filler v" .. VERSION
+titleLbl.Text = "Blueprint Filler"
 titleLbl.TextColor3 = TEXT_WHITE
 titleLbl.Font = Enum.Font.GothamBold
-titleLbl.TextSize = 14
+titleLbl.TextSize = 13
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 titleLbl.Parent = titleBar
+
+local versionLbl = Instance.new("TextLabel")
+versionLbl.Size = UDim2.new(0, 40, 1, 0)
+versionLbl.Position = UDim2.new(0, 130, 0, 0)
+versionLbl.BackgroundTransparency = 1
+versionLbl.Text = "v" .. VERSION
+versionLbl.TextColor3 = TEXT_DIM
+versionLbl.Font = Enum.Font.Gotham
+versionLbl.TextSize = 10
+versionLbl.TextXAlignment = Enum.TextXAlignment.Left
+versionLbl.Parent = titleBar
 
 local minimizeBtn = Instance.new("TextButton")
 minimizeBtn.Size = UDim2.fromOffset(24, 24)
@@ -805,25 +811,62 @@ closeBtn.TextSize = 12
 closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
+-- Sidebar
+local SIDEBAR_W = 46
+local sidebar = Instance.new("Frame")
+sidebar.Name = "Sidebar"
+sidebar.Size = UDim2.new(0, SIDEBAR_W, 1, -36)
+sidebar.Position = UDim2.fromOffset(0, 36)
+sidebar.BackgroundColor3 = BG_SIDEBAR
+sidebar.BorderSizePixel = 0
+sidebar.Parent = panel
+
+local sidebarLayout = Instance.new("UIListLayout", sidebar)
+sidebarLayout.Padding = UDim.new(0, 2)
+sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+sidebarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+local sidebarPad = Instance.new("UIPadding", sidebar)
+sidebarPad.PaddingTop = UDim.new(0, 8)
+
+-- Sidebar bottom-right corner fix (so it doesn't stick out past the panel)
+local sidebarFix = Instance.new("Frame")
+sidebarFix.Size = UDim2.new(0, SIDEBAR_W, 0, 10)
+sidebarFix.Position = UDim2.new(0, 0, 1, -10)
+sidebarFix.BackgroundColor3 = BG_SIDEBAR
+sidebarFix.BorderSizePixel = 0
+sidebarFix.ZIndex = 0
+sidebarFix.Parent = panel
+
+-- Content container
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.Size = UDim2.new(1, -SIDEBAR_W, 1, -36)
+content.Position = UDim2.fromOffset(SIDEBAR_W, 36)
+content.BackgroundColor3 = BG_DARK
+content.BorderSizePixel = 0
+content.Parent = panel
+
+-- Body (scrollable)
 local body = Instance.new("ScrollingFrame")
-body.Size = UDim2.new(1, -28, 1, -46)
-body.Position = UDim2.fromOffset(8, 40)
+body.Size = UDim2.new(1, -20, 1, -8)
+body.Position = UDim2.fromOffset(8, 4)
 body.BackgroundTransparency = 1
 body.BorderSizePixel = 0
 body.ScrollBarThickness = 4
 body.ScrollBarImageColor3 = ACCENT
 body.CanvasSize = UDim2.new(0, 0, 0, 0)
 body.AutomaticCanvasSize = Enum.AutomaticSize.Y
-body.Parent = panel
+body.Parent = content
 
 local layout = Instance.new("UIListLayout", body)
 layout.Padding = UDim.new(0, 6)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local padding = Instance.new("UIPadding", body)
-padding.PaddingTop = UDim.new(0, 6)
-padding.PaddingBottom = UDim.new(0, 6)
+local bodyPad = Instance.new("UIPadding", body)
+bodyPad.PaddingTop = UDim.new(0, 6)
+bodyPad.PaddingBottom = UDim.new(0, 12)
 
+-- Resize handle
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(16, 16)
 resizeHandle.Position = UDim2.new(1, -20, 1, -20)
@@ -834,7 +877,6 @@ resizeHandle.AutoButtonColor = false
 resizeHandle.ZIndex = 60
 resizeHandle.Parent = panel
 Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 4)
-
 for i = 1, 3 do
     local line = Instance.new("Frame")
     line.Size = UDim2.fromOffset(8 - i * 2, 1)
@@ -844,35 +886,23 @@ for i = 1, 3 do
     line.Parent = resizeHandle
 end
 
+-- Side grip
 local sideGrip = Instance.new("TextButton")
 sideGrip.Name = "SideGrip"
-sideGrip.Size = UDim2.new(0, 14, 1, -20)
-sideGrip.Position = UDim2.new(1, -18, 0, 10)
-sideGrip.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+sideGrip.Size = UDim2.new(0, 10, 1, -46)
+sideGrip.Position = UDim2.new(1, -12, 0, 42)
+sideGrip.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
 sideGrip.BorderSizePixel = 0
 sideGrip.Text = ""
 sideGrip.AutoButtonColor = false
 sideGrip.ZIndex = 55
 sideGrip.Parent = panel
-Instance.new("UICorner", sideGrip).CornerRadius = UDim.new(0, 5)
-local sgStroke = Instance.new("UIStroke", sideGrip)
-sgStroke.Color = Color3.fromRGB(55, 55, 70)
-sgStroke.Thickness = 1
+Instance.new("UICorner", sideGrip).CornerRadius = UDim.new(0, 4)
 
-for i = 1, 5 do
-    local dot = Instance.new("Frame")
-    dot.Size = UDim2.fromOffset(4, 4)
-    dot.Position = UDim2.new(0.5, -2, 0, 12 + (i - 1) * 12)
-    dot.BackgroundColor3 = TEXT_GRAY
-    dot.BorderSizePixel = 0
-    dot.Parent = sideGrip
-    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
-end
-
+-- Drag handle for title bar
 local function makeDragHandle(frame)
     local dragging = false
     local dragStart, startPos
-
     frame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
@@ -881,7 +911,6 @@ local function makeDragHandle(frame)
             startPos = panel.Position
         end
     end)
-
     UIS.InputChanged:Connect(function(input)
         if not dragging then return end
         if input.UserInputType == Enum.UserInputType.MouseMovement
@@ -893,7 +922,6 @@ local function makeDragHandle(frame)
             )
         end
     end)
-
     UIS.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
@@ -905,29 +933,148 @@ end
 makeDragHandle(titleBar)
 makeDragHandle(sideGrip)
 
--- ─────────── UI FACTORY ───────────
-local ROW_SECTION  = 20
-local ROW_PARA     = 38
-local ROW_BTN      = 34
-local ROW_BTN_DESC = 46
-local ROW_TOGGLE   = 34
-local ROW_TOG_DESC = 46
-local ROW_INPUT    = 34
-local ROW_SLIDER   = 44
-local ROW_DROPDOWN = 38
+-- ─────────── TAB SYSTEM ───────────
+local sectionMarkers = {}
+local tabButtons = {}
+local tabIndicators = {}
+local activeTab = nil
 
-local function makeSection(text, order)
+local TAB_DEFS = {
+    { key = "target", icon = "◎", label = "Target", order = 1 },
+    { key = "planks", icon = "❖", label = "Planks", order = 2 },
+    { key = "fill",   icon = "▶", label = "Fill",   order = 3 },
+    { key = "nav",    icon = "✦", label = "Nav",    order = 4 },
+    { key = "config", icon = "⚙", label = "Config", order = 5 },
+    { key = "log",    icon = "☰", label = "Log",    order = 6 },
+}
+if IS_OWNER then
+    table.insert(TAB_DEFS, { key = "debug", icon = "⚒", label = "Debug", order = 7 })
+end
+
+local function setActiveTab(key, silent)
+    activeTab = key
+    for k, btn in pairs(tabButtons) do
+        local ind = tabIndicators[k]
+        if k == key then
+            btn.TextColor3 = TEXT_WHITE
+            btn.BackgroundTransparency = 0
+            btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+            if ind then ind.Visible = true end
+        else
+            btn.TextColor3 = TEXT_DIM
+            btn.BackgroundTransparency = 1
+            if ind then ind.Visible = false end
+        end
+    end
+end
+
+local function scrollToTab(key)
+    local marker = sectionMarkers[key]
+    if not marker then return end
+    local bodyTopAbsY = body.AbsolutePosition.Y
+    local markerAbsY = marker.AbsolutePosition.Y
+    local currentScroll = body.CanvasPosition.Y
+    local targetY = currentScroll + (markerAbsY - bodyTopAbsY) - 8
+    targetY = math.max(0, targetY)
+
+    local canvasH = body.AbsoluteCanvasSize.Y
+    local frameH = body.AbsoluteSize.Y
+    local maxY = math.max(0, canvasH - frameH)
+    targetY = math.min(targetY, maxY)
+
+    local tween = TweenService:Create(body,
+        TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { CanvasPosition = Vector2.new(0, targetY) })
+    tween:Play()
+    setActiveTab(key)
+end
+
+local function makeTabButton(def)
+    local btn = Instance.new("TextButton")
+    btn.Name = "Tab_" .. def.key
+    btn.Size = UDim2.new(1, -8, 0, 36)
+    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    btn.BackgroundTransparency = 1
+    btn.BorderSizePixel = 0
+    btn.Text = def.icon
+    btn.TextColor3 = TEXT_DIM
+    btn.TextSize = 18
+    btn.Font = Enum.Font.GothamBold
+    btn.LayoutOrder = def.order
+    btn.AutoButtonColor = false
+    btn.Parent = sidebar
+
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    local ind = Instance.new("Frame")
+    ind.Size = UDim2.new(0, 3, 0, 20)
+    ind.Position = UDim2.new(0, -1, 0.5, -10)
+    ind.BackgroundColor3 = ACCENT
+    ind.BorderSizePixel = 0
+    ind.Visible = false
+    ind.Parent = btn
+    Instance.new("UICorner", ind).CornerRadius = UDim.new(0, 2)
+
+    btn.MouseEnter:Connect(function()
+        if activeTab ~= def.key then
+            btn.BackgroundTransparency = 0.5
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if activeTab ~= def.key then
+            btn.BackgroundTransparency = 1
+        end
+    end)
+    btn.MouseButton1Click:Connect(function()
+        scrollToTab(def.key)
+    end)
+
+    tabButtons[def.key] = btn
+    tabIndicators[def.key] = ind
+end
+
+-- ─────────── UI FACTORY ───────────
+local ROW_SECTION  = 22
+local ROW_PARA     = 42
+local ROW_BTN      = 36
+local ROW_BTN_DESC = 50
+local ROW_TOGGLE   = 38
+local ROW_TOG_DESC = 50
+local ROW_INPUT    = 38
+local ROW_SLIDER   = 48
+local ROW_DROPDOWN = 42
+
+local function makeSection(text, order, tabKey)
+    local container = Instance.new("Frame")
+    container.Name = "Section_" .. tostring(text)
+    container.Size = UDim2.new(1, 0, 0, ROW_SECTION)
+    container.BackgroundTransparency = 1
+    container.LayoutOrder = order
+    container.Parent = body
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(0, 3, 0, 12)
+    bar.Position = UDim2.new(0, 0, 0.5, -6)
+    bar.BackgroundColor3 = ACCENT
+    bar.BorderSizePixel = 0
+    bar.Parent = container
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 2)
+
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, ROW_SECTION)
+    lbl.Size = UDim2.new(1, -14, 1, 0)
+    lbl.Position = UDim2.fromOffset(10, 0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = "  " .. text
-    lbl.TextColor3 = ACCENT
+    lbl.Text = text
+    lbl.TextColor3 = TEXT_WHITE
     lbl.Font = Enum.Font.GothamBold
     lbl.TextSize = 11
     lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.LayoutOrder = order
-    lbl.Parent = body
-    return lbl
+    lbl.Parent = container
+
+    if tabKey then
+        sectionMarkers[tabKey] = container
+    end
+    return container
 end
 
 local function makeParagraph(title, desc, order, color)
@@ -940,8 +1087,8 @@ local function makeParagraph(title, desc, order, color)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -12, 0, 14)
-    t.Position = UDim2.fromOffset(6, 4)
+    t.Size = UDim2.new(1, -16, 0, 14)
+    t.Position = UDim2.fromOffset(8, 6)
     t.BackgroundTransparency = 1
     t.Text = title
     t.TextColor3 = TEXT_WHITE
@@ -951,8 +1098,8 @@ local function makeParagraph(title, desc, order, color)
     t.Parent = frame
 
     local d = Instance.new("TextLabel")
-    d.Size = UDim2.new(1, -12, 0, 18)
-    d.Position = UDim2.fromOffset(6, 18)
+    d.Size = UDim2.new(1, -16, 0, 20)
+    d.Position = UDim2.fromOffset(8, 20)
     d.BackgroundTransparency = 1
     d.Text = desc
     d.TextColor3 = color or TEXT_GRAY
@@ -975,29 +1122,26 @@ local function makeButton(text, desc, onClick, order)
     btn.BackgroundColor3 = BG_ROW
     btn.BorderSizePixel = 0
     btn.Text = ""
-    btn.AutoButtonColor = true
+    btn.AutoButtonColor = false
     btn.LayoutOrder = order
     btn.Parent = body
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-    local stroke = Instance.new("UIStroke", btn)
-    stroke.Color = Color3.fromRGB(50, 50, 65)
-    stroke.Thickness = 1
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -12, 0, 14)
-    t.Position = UDim2.fromOffset(6, desc and 4 or 10)
+    t.Size = UDim2.new(1, -16, 0, 14)
+    t.Position = UDim2.fromOffset(8, desc and 6 or 11)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
-    t.Font = Enum.Font.GothamBold
+    t.Font = Enum.Font.GothamMedium
     t.TextSize = 11
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.Parent = btn
 
     if desc then
         local d = Instance.new("TextLabel")
-        d.Size = UDim2.new(1, -12, 0, 18)
-        d.Position = UDim2.fromOffset(6, 20)
+        d.Size = UDim2.new(1, -16, 0, 20)
+        d.Position = UDim2.fromOffset(8, 22)
         d.BackgroundTransparency = 1
         d.Text = desc
         d.TextColor3 = TEXT_GRAY
@@ -1008,6 +1152,12 @@ local function makeButton(text, desc, onClick, order)
         d.Parent = btn
     end
 
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = BG_ROW_HOVER
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = BG_ROW
+    end)
     btn.MouseButton1Click:Connect(function()
         local ok, err = pcall(onClick)
         if not ok then warn("[BPFiller] button error: " .. tostring(err)) end
@@ -1025,8 +1175,8 @@ local function makeToggle(text, desc, default, onChange, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -60, 0, 14)
-    t.Position = UDim2.fromOffset(6, desc and 4 or 10)
+    t.Size = UDim2.new(1, -70, 0, 14)
+    t.Position = UDim2.fromOffset(8, desc and 6 or 12)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
@@ -1037,8 +1187,8 @@ local function makeToggle(text, desc, default, onChange, order)
 
     if desc then
         local d = Instance.new("TextLabel")
-        d.Size = UDim2.new(1, -60, 0, 18)
-        d.Position = UDim2.fromOffset(6, 20)
+        d.Size = UDim2.new(1, -70, 0, 20)
+        d.Position = UDim2.fromOffset(8, 22)
         d.BackgroundTransparency = 1
         d.Text = desc
         d.TextColor3 = TEXT_GRAY
@@ -1051,11 +1201,12 @@ local function makeToggle(text, desc, default, onChange, order)
 
     local state = default
     local switch = Instance.new("TextButton")
-    switch.Size = UDim2.fromOffset(40, 22)
-    switch.Position = UDim2.new(1, -46, 0.5, -11)
-    switch.BackgroundColor3 = state and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(45, 45, 55)
+    switch.Size = UDim2.fromOffset(42, 22)
+    switch.Position = UDim2.new(1, -50, 0.5, -11)
+    switch.BackgroundColor3 = state and ACCENT or Color3.fromRGB(45, 45, 55)
     switch.BorderSizePixel = 0
     switch.Text = ""
+    switch.AutoButtonColor = false
     switch.Parent = frame
     Instance.new("UICorner", switch).CornerRadius = UDim.new(0, 11)
 
@@ -1069,7 +1220,7 @@ local function makeToggle(text, desc, default, onChange, order)
 
     local function setState(v)
         state = v
-        switch.BackgroundColor3 = state and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(45, 45, 55)
+        switch.BackgroundColor3 = state and ACCENT or Color3.fromRGB(45, 45, 55)
         knob.Position = state and UDim2.new(1, -18, 0, 3) or UDim2.fromOffset(3, 3)
     end
 
@@ -1092,7 +1243,7 @@ local function makeInput(text, default, onChange, order)
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.fromOffset(90, ROW_INPUT)
-    t.Position = UDim2.fromOffset(6, 0)
+    t.Position = UDim2.fromOffset(8, 0)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
@@ -1102,8 +1253,8 @@ local function makeInput(text, default, onChange, order)
     t.Parent = frame
 
     local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, -108, 0, 26)
-    box.Position = UDim2.new(0, 100, 0.5, -13)
+    box.Size = UDim2.new(1, -112, 0, 28)
+    box.Position = UDim2.new(0, 104, 0.5, -14)
     box.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     box.BorderSizePixel = 0
     box.Text = tostring(default)
@@ -1115,10 +1266,11 @@ local function makeInput(text, default, onChange, order)
     box.Parent = frame
     Instance.new("UICorner", box).CornerRadius = UDim.new(0, 5)
     local bs = Instance.new("UIStroke", box)
-    bs.Color = Color3.fromRGB(60, 60, 75)
+    bs.Color = Color3.fromRGB(50, 50, 65)
     bs.Thickness = 1
-
+    box.Focused:Connect(function() bs.Color = ACCENT end)
     box.FocusLost:Connect(function()
+        bs.Color = Color3.fromRGB(50, 50, 65)
         local ok, err = pcall(onChange, box.Text)
         if not ok then warn("[BPFiller] input error: " .. tostring(err)) end
     end)
@@ -1135,8 +1287,8 @@ local function makeSlider(text, min, max, default, onChange, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -60, 0, 14)
-    t.Position = UDim2.fromOffset(6, 4)
+    t.Size = UDim2.new(1, -70, 0, 14)
+    t.Position = UDim2.fromOffset(8, 6)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
@@ -1146,8 +1298,8 @@ local function makeSlider(text, min, max, default, onChange, order)
     t.Parent = frame
 
     local valLbl = Instance.new("TextLabel")
-    valLbl.Size = UDim2.fromOffset(50, 14)
-    valLbl.Position = UDim2.new(1, -56, 0, 4)
+    valLbl.Size = UDim2.fromOffset(60, 14)
+    valLbl.Position = UDim2.new(1, -68, 0, 6)
     valLbl.BackgroundTransparency = 1
     valLbl.Text = string.format("%.3f", default)
     valLbl.TextColor3 = ACCENT
@@ -1157,8 +1309,8 @@ local function makeSlider(text, min, max, default, onChange, order)
     valLbl.Parent = frame
 
     local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, -12, 0, 6)
-    track.Position = UDim2.fromOffset(6, 30)
+    track.Size = UDim2.new(1, -16, 0, 6)
+    track.Position = UDim2.fromOffset(8, 30)
     track.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     track.BorderSizePixel = 0
     track.Parent = frame
@@ -1181,7 +1333,6 @@ local function makeSlider(text, min, max, default, onChange, order)
     Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 7)
 
     local dragging = false
-
     local function setFromX(x)
         local abs = track.AbsolutePosition.X
         local size = track.AbsoluteSize.X
@@ -1202,7 +1353,6 @@ local function makeSlider(text, min, max, default, onChange, order)
             setFromX(input.Position.X)
         end
     end)
-
     UIS.InputChanged:Connect(function(input)
         if not dragging then return end
         if input.UserInputType == Enum.UserInputType.MouseMovement
@@ -1210,7 +1360,6 @@ local function makeSlider(text, min, max, default, onChange, order)
             setFromX(input.Position.X)
         end
     end)
-
     UIS.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
@@ -1237,8 +1386,8 @@ local function makeDropdown(text, values, default, onChange, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(105, ROW_DROPDOWN)
-    t.Position = UDim2.fromOffset(6, 0)
+    t.Size = UDim2.fromOffset(110, ROW_DROPDOWN)
+    t.Position = UDim2.fromOffset(8, 0)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = TEXT_WHITE
@@ -1248,38 +1397,38 @@ local function makeDropdown(text, values, default, onChange, order)
     t.Parent = frame
 
     local sel = Instance.new("TextButton")
-    sel.Size = UDim2.new(1, -120, 0, 26)
-    sel.Position = UDim2.new(0, 112, 0.5, -13)
+    sel.Size = UDim2.new(1, -128, 0, 28)
+    sel.Position = UDim2.new(0, 118, 0.5, -14)
     sel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     sel.BorderSizePixel = 0
     sel.Text = ""
-    sel.AutoButtonColor = true
+    sel.AutoButtonColor = false
     sel.TextXAlignment = Enum.TextXAlignment.Left
     sel.Parent = frame
     Instance.new("UICorner", sel).CornerRadius = UDim.new(0, 5)
     local ss = Instance.new("UIStroke", sel)
-    ss.Color = Color3.fromRGB(60, 60, 75)
+    ss.Color = Color3.fromRGB(50, 50, 65)
     ss.Thickness = 1
 
     local selLbl = Instance.new("TextLabel")
-    selLbl.Size = UDim2.new(1, -22, 1, 0)
-    selLbl.Position = UDim2.fromOffset(8, 0)
+    selLbl.Size = UDim2.new(1, -26, 1, 0)
+    selLbl.Position = UDim2.fromOffset(10, 0)
     selLbl.BackgroundTransparency = 1
     selLbl.Text = tostring(default)
     selLbl.TextColor3 = TEXT_WHITE
     selLbl.Font = Enum.Font.GothamMedium
-    selLbl.TextSize = 12
+    selLbl.TextSize = 11
     selLbl.TextXAlignment = Enum.TextXAlignment.Left
     selLbl.Parent = sel
 
     local arrow = Instance.new("TextLabel")
-    arrow.Size = UDim2.fromOffset(18, 26)
+    arrow.Size = UDim2.fromOffset(18, 28)
     arrow.Position = UDim2.new(1, -20, 0, 0)
     arrow.BackgroundTransparency = 1
-    arrow.Text = "v"
+    arrow.Text = "▾"
     arrow.TextColor3 = TEXT_GRAY
     arrow.Font = Enum.Font.GothamBold
-    arrow.TextSize = 10
+    arrow.TextSize = 11
     arrow.Parent = sel
 
     local currentValues = values
@@ -1311,7 +1460,7 @@ local function makeDropdown(text, values, default, onChange, order)
         listFrame.Parent = gui
         Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 5)
         local ls = Instance.new("UIStroke", listFrame)
-        ls.Color = ACCENT
+        ls.Color = ACCENT_SOFT
         ls.Thickness = 1
 
         local lLayout = Instance.new("UIListLayout", listFrame)
@@ -1322,15 +1471,18 @@ local function makeDropdown(text, values, default, onChange, order)
         for _, v in ipairs(currentValues) do
             local item = Instance.new("TextButton")
             item.Size = UDim2.new(1, -6, 0, 22)
-            item.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+            item.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
             item.BorderSizePixel = 0
             item.Text = tostring(v)
             item.TextColor3 = TEXT_WHITE
             item.Font = Enum.Font.GothamMedium
             item.TextSize = 11
+            item.AutoButtonColor = false
             item.Parent = listFrame
             Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
 
+            item.MouseEnter:Connect(function() item.BackgroundColor3 = BG_ROW_HOVER end)
+            item.MouseLeave:Connect(function() item.BackgroundColor3 = Color3.fromRGB(28, 28, 36) end)
             item.MouseButton1Click:Connect(function()
                 selLbl.Text = tostring(v)
                 closeList()
@@ -1492,16 +1644,9 @@ local function fillAllBlueprints()
     end
 
     local pl = collectMatchingPlanks()
-    if #pl == 0 then
-        setStatus("No matching planks")
-        return
-    end
-
+    if #pl == 0 then setStatus("No matching planks"); return end
     local bps = collectBlueprints()
-    if #bps == 0 then
-        setStatus("No blueprints for " .. selectedPlayer.Name)
-        return
-    end
+    if #bps == 0 then setStatus("No blueprints for " .. selectedPlayer.Name); return end
 
     autoFillRunning = true
     autoFillCancel = false
@@ -1523,18 +1668,13 @@ local function fillAllBlueprints()
                 plankIdx = (plankIdx % #pl) + 1
                 if e.part and e.part.Parent then
                     if isHoldMode() then
-                        if not heldPlanks[e.model] then
-                            plankEntry = e; break
-                        end
+                        if not heldPlanks[e.model] then plankEntry = e; break end
                     else
                         plankEntry = e; break
                     end
                 end
             end
-            if not plankEntry then
-                setStatus("Ran out of matching planks")
-                break
-            end
+            if not plankEntry then setStatus("Ran out of matching planks"); break end
 
             setStatus(string.format("%s %d/%d (%s)", tag, i, #bps, bp.Name))
             local ok = doFill(bp, plankEntry, root)
@@ -1560,10 +1700,7 @@ local function fillNearestBlueprint()
         local c = blueprintCenter(bp)
         if c then
             local d = (c - root.Position).Magnitude
-            if d < nearestDist then
-                nearestDist = d
-                nearest = bp
-            end
+            if d < nearestDist then nearestDist = d; nearest = bp end
         end
     end
     if not nearest then setStatus("No blueprint with center"); return end
@@ -1586,7 +1723,6 @@ local function loopTick()
         setStatus("Loop: waiting for planks...")
         return
     end
-
     local bps = collectBlueprints()
     if #bps == 0 then return end
 
@@ -1607,9 +1743,7 @@ local function loopTick()
                 plankIdx = (plankIdx % math.max(1, #pl)) + 1
                 if e.part and e.part.Parent then
                     if isHoldMode() then
-                        if not heldPlanks[e.model] then
-                            plankEntry = e; break
-                        end
+                        if not heldPlanks[e.model] then plankEntry = e; break end
                     else
                         plankEntry = e; break
                     end
@@ -1657,10 +1791,7 @@ local function startClickMode()
         if not isBlueprint(node) then return end
 
         local pl = collectMatchingPlanks()
-        if #pl == 0 then
-            setStatus("No matching planks available")
-            return
-        end
+        if #pl == 0 then setStatus("No matching planks available"); return end
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
         local entry = pl[1]
         local tag = isHoldMode() and "HOLD" or "TP"
@@ -1700,9 +1831,7 @@ local function startPickMode()
         local pm = getPlayerModels()
         while node and node.Parent ~= pm do node = node.Parent end
         if not node or not pm then stopPickMode(); return end
-        if not isLoosePlank(node) then
-            setStatus("Not a matching plank"); stopPickMode(); return
-        end
+        if not isLoosePlank(node) then setStatus("Not a matching plank"); stopPickMode(); return end
         local tc = plankTreeClass(node)
         if tc then
             selectedTreeClass = tc
@@ -1773,9 +1902,7 @@ local function resetSettings()
 
     if writefile and isfile then
         pcall(function()
-            if isfile(SETTINGS_FILE) then
-                writefile(SETTINGS_FILE, "{}")
-            end
+            if isfile(SETTINGS_FILE) then writefile(SETTINGS_FILE, "{}") end
         end)
     end
 
@@ -1787,41 +1914,45 @@ local function resetSettings()
     setStatus("Settings reset to defaults")
 end
 
--- ─────────── BUILD UI ───────────
+-- ─────────── BUILD CONTENT ───────────
 local order = 0
 local function nextOrder() order += 1; return order end
 
-makeSection("FILL METHOD", nextOrder())
+-- Fill tab
+makeSection("FILL METHOD", nextOrder(), "fill")
+makeDropdown("Mode", fillMethodLabels,
+    fillMethod == "Working" and "Working (teleport)" or "Testing/WIP (hold)",
+    function(opt)
+        if opt == "Working (teleport)" then
+            fillMethod = "Working"
+            setStatus("Mode: Working (teleport)")
+        else
+            fillMethod = "Testing/WIP"
+            setStatus("Mode: Testing/WIP (hold)")
+        end
+    end, nextOrder())
 
-makeDropdown("Mode", fillMethodLabels, fillMethod == "Working" and "Working (teleport)" or "Testing/WIP (hold)", function(opt)
-    if opt == "Working (teleport)" then
-        fillMethod = "Working"
-        setStatus("Mode: Working (teleport)")
-    else
-        fillMethod = "Testing/WIP"
-        setStatus("Mode: Testing/WIP (hold)")
-    end
-end, nextOrder())
+-- Target tab
+makeSection("TARGET", nextOrder(), "target")
+playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(),
+    selectedPlayer.Name or "(Me)", function(opt)
+        if opt == "(Me)" then selectedPlayer = plr
+        else selectedPlayer = Players:FindFirstChild(opt) or plr end
+        setStatus("Blueprint owner: " .. selectedPlayer.Name)
+    end, nextOrder())
 
-makeSection("TARGET", nextOrder())
-
-playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(), selectedPlayer.Name or "(Me)", function(opt)
-    if opt == "(Me)" then selectedPlayer = plr
-    else selectedPlayer = Players:FindFirstChild(opt) or plr end
-    setStatus("Blueprint owner: " .. selectedPlayer.Name)
-end, nextOrder())
-
-woodOwnerDropdown = makeDropdown("Use Wood From", getPlayerOptions(), selectedWoodOwner.Name or "(Me)", function(opt)
-    if opt == "(Me)" then selectedWoodOwner = plr
-    else selectedWoodOwner = Players:FindFirstChild(opt) or plr end
-    setStatus("Wood source: " .. selectedWoodOwner.Name)
-    updateCrossWarn()
-    updateInventory()
-end, nextOrder())
+woodOwnerDropdown = makeDropdown("Use Wood From", getPlayerOptions(),
+    selectedWoodOwner.Name or "(Me)", function(opt)
+        if opt == "(Me)" then selectedWoodOwner = plr
+        else selectedWoodOwner = Players:FindFirstChild(opt) or plr end
+        setStatus("Wood source: " .. selectedWoodOwner.Name)
+        updateCrossWarn()
+        updateInventory()
+    end, nextOrder())
 
 crossWarnPara = makeParagraph("Wood Source Info",
     selectedWoodOwner == plr and "Wood source: yourself (grabs will work)."
-    or ("WARNING: Wood source is " .. selectedWoodOwner.Name .. " - grabs may fail without perms."),
+    or ("WARNING: Wood source is " .. selectedWoodOwner.Name .. " - may fail without perms."),
     nextOrder(),
     selectedWoodOwner == plr and TEXT_GRAY or WARN_RED)
 
@@ -1841,8 +1972,8 @@ makeButton("Refresh Players",
         setStatus("Refreshed dropdowns")
     end, nextOrder())
 
-makeSection("PLANK SOURCE", nextOrder())
-
+-- Planks tab
+makeSection("PLANK SOURCE", nextOrder(), "planks")
 pickBtnHandle = makeButton("Pick Plank",
     "Click a loose plank in the world to set the target wood type",
     function() startPickMode() end, nextOrder())
@@ -1860,8 +1991,8 @@ end, nextOrder())
 
 makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
 
+-- Fill tab continues
 makeSection("MODES", nextOrder())
-
 makeButton("Auto Fill All",
     "One-shot fill of every target blueprint using the current mode",
     function() fillAllBlueprints() end, nextOrder())
@@ -1872,24 +2003,21 @@ makeButton("Fill Nearest BP",
 
 makeToggle("Auto Fill Nearest",
     "Automatically fill the nearest blueprint every few seconds",
-    false,
-    function(state)
+    false, function(state)
         nearestMode = state
         setStatus(state and "Auto-fill-nearest ON" or "Auto-fill-nearest OFF")
     end, nextOrder())
 
 makeToggle("Loop Mode",
     "Continuously fill blueprints as new planks appear",
-    false,
-    function(state)
+    false, function(state)
         loopMode = state
         setStatus(state and "Loop ON" or "Loop OFF")
     end, nextOrder())
 
 clickToggleHandle = makeToggle("Click to Fill",
     "Click a blueprint to fill it with one matching plank",
-    false,
-    function(state)
+    false, function(state)
         if state then startClickMode() else stopClickMode() end
         setStatus(state and "Click ON" or "Click OFF")
     end, nextOrder())
@@ -1916,10 +2044,7 @@ else fireSigDefaultText = "5) Model + Mouse.Hit" end
 
 makeDropdown("Fire Signature", getFireSigOptions(), fireSigDefaultText, function(opt)
     local n = tonumber(string.match(opt, "^(%d+)"))
-    if n then
-        fireSignature = n
-        setStatus("Fire signature: " .. opt)
-    end
+    if n then fireSignature = n; setStatus("Fire signature: " .. opt) end
 end, nextOrder())
 
 makeSlider("Fire Interval (s)", 0.1, 1.0, HOLD_FIRE_INTERVAL, function(v)
@@ -1929,32 +2054,26 @@ end, nextOrder())
 
 makeToggle("Fire Every Frame",
     "Max hold strength (fires ClientIsDragging every render frame)",
-    fireEveryFrame,
-    function(state)
+    fireEveryFrame, function(state)
         fireEveryFrame = state
         setStatus(state and "Frame-spam ON" or "Frame-spam OFF")
     end, nextOrder())
 
 makeToggle("Fire Once Only",
     "Only fire ClientIsDragging on grab. No repeat fires afterward.",
-    fireOnceOnly,
-    function(state)
+    fireOnceOnly, function(state)
         fireOnceOnly = state
         setStatus(state and "Fire-once mode ON" or "Fire-once mode OFF")
     end, nextOrder())
 
-makeSection("NAVIGATION", nextOrder())
+-- Nav tab
+makeSection("NAVIGATION", nextOrder(), "nav")
 
 makeButton("Fly",
     "Toggle flight. WASD + Space/Shift on PC. On-screen buttons on mobile.",
     function()
-        if flying then
-            stopFly()
-            setStatus("Fly OFF")
-        else
-            startFly()
-            setStatus("Fly ON")
-        end
+        if flying then stopFly(); setStatus("Fly OFF")
+        else startFly(); setStatus("Fly ON") end
     end, nextOrder())
 
 makeSlider("Fly Speed", 20, 200, flySpeed, function(v)
@@ -1985,27 +2104,24 @@ makeButton("Refresh Bases",
         setStatus("Base list refreshed")
     end, nextOrder())
 
-makeSection("CONFIG", nextOrder())
+-- Config tab
+makeSection("CONFIG", nextOrder(), "config")
 
 makeButton("Save Settings",
     "Write current settings to disk (persists across re-executions)",
     function()
-        local data = collectCurrentSettings()
-        local ok, msg = trySaveSettings(data)
-        if ok then
-            setStatus("Settings saved")
-        else
-            setStatus("Save failed: " .. tostring(msg))
-        end
+        local ok, msg = trySaveSettings(collectCurrentSettings())
+        if ok then setStatus("Settings saved")
+        else setStatus("Save failed: " .. tostring(msg)) end
     end, nextOrder())
 
 makeButton("Reset to Defaults",
     "Wipe everything back to defaults",
     function() resetSettings() end, nextOrder())
 
--- SNIFFER: owner only
+-- Debug tab (owner only)
 if IS_OWNER then
-    makeSection("DEBUG / SNIFFER (owner only)", nextOrder())
+    makeSection("DEBUG / SNIFFER (owner only)", nextOrder(), "debug")
 
     _G._BPFDragSniffing = false
     _G._BPFSnifferInstalled = false
@@ -2033,10 +2149,7 @@ if IS_OWNER then
                     return oldNamecall(self, ...)
                 end)
             end)
-            if ok then
-                _G._BPFSnifferInstalled = true
-                return true, "installed"
-            end
+            if ok then _G._BPFSnifferInstalled = true; return true, "installed" end
         end
         return false, "no hook available"
     end
@@ -2073,8 +2186,8 @@ if IS_OWNER then
     end, nextOrder())
 end
 
--- CONSOLE SECTION
-makeSection("CONSOLE (LIVE OUTPUT)", nextOrder())
+-- Log tab
+makeSection("CONSOLE (LIVE OUTPUT)", nextOrder(), "log")
 
 local consoleHolder = Instance.new("Frame")
 consoleHolder.Size = UDim2.new(1, 0, 0, 180)
@@ -2119,15 +2232,10 @@ end, nextOrder())
 makeButton("Copy Console to Clipboard", nil, function()
     local all = table.concat(consoleLines, "\n")
     local ok = pcall(function() if setclipboard then setclipboard(all) end end)
-    if ok and setclipboard then
-        setStatus("Copied")
-    else
-        setStatus("Clipboard unavailable")
-    end
+    if ok and setclipboard then setStatus("Copied") else setStatus("Clipboard unavailable") end
 end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
-
 inventoryPara = makeParagraph("Loose Planks", "Scanning...", nextOrder())
 
 makeButton("Rescan Now", nil, function()
@@ -2136,8 +2244,42 @@ makeButton("Rescan Now", nil, function()
 end, nextOrder())
 
 makeSection("STATUS", nextOrder())
-
 statusPara = makeParagraph("Status", "Ready - mode: " .. fillMethod, nextOrder())
+
+-- Create tab buttons
+for _, def in ipairs(TAB_DEFS) do
+    makeTabButton(def)
+end
+
+-- Set initial active tab
+setActiveTab("target")
+
+-- Update active tab based on scroll position
+local lastScrollCheck = 0
+RunService.Heartbeat:Connect(function()
+    if not gui.Parent then return end
+    if tick() - lastScrollCheck < 0.15 then return end
+    lastScrollCheck = tick()
+
+    local scrollY = body.CanvasPosition.Y
+    local bodyTopAbsY = body.AbsolutePosition.Y
+    local bestKey, bestDist = nil, math.huge
+
+    for key, marker in pairs(sectionMarkers) do
+        local markerRelY = (marker.AbsolutePosition.Y - bodyTopAbsY) + scrollY
+        if markerRelY <= scrollY + 40 then
+            local dist = (scrollY + 40) - markerRelY
+            if markerRelY >= 0 and dist < bestDist then
+                bestDist = dist
+                bestKey = key
+            end
+        end
+    end
+
+    if bestKey and bestKey ~= activeTab then
+        setActiveTab(bestKey)
+    end
+end)
 
 -- ─────────── MIN / CLOSE / RESIZE ───────────
 local minimized = false
@@ -2188,8 +2330,8 @@ UIS.InputChanged:Connect(function(input)
         local cur = UIS:GetMouseLocation()
         local dx = cur.X - resizeStartMouse.X
         local dy = cur.Y - resizeStartMouse.Y
-        local newW = math.clamp(resizeStartSize.X + dx, 260, 700)
-        local newH = math.clamp(resizeStartSize.Y + dy, 300, 900)
+        local newW = math.clamp(resizeStartSize.X + dx, 300, 700)
+        local newH = math.clamp(resizeStartSize.Y + dy, 320, 900)
         panel.Size = UDim2.fromOffset(newW, newH)
     end
 end)
@@ -2260,7 +2402,7 @@ task.spawn(function()
     end
 end)
 
-print("[BPFiller] v" .. VERSION .. " loaded.")
+print("[BPFiller] v" .. VERSION .. " (Kron v2 UI) loaded.")
 print("[BPFiller] Mode: " .. fillMethod .. "  |  Owner access: " .. tostring(IS_OWNER))
 if savedSettings and next(savedSettings) then
     print("[BPFiller] Loaded saved settings.")
