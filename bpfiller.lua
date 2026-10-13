@@ -20,10 +20,8 @@ local IS_OWNER = (plr.Name == "mejustexploiting")
 local consoleLabel = nil
 local consoleLines = {}
 local MAX_CONSOLE_LINES = 300
-local consolePaused = false
 
 local function uiLog(msg)
-    if consolePaused then return end
     local line = string.format("[%.2f] %s", tick() % 1000, tostring(msg))
     table.insert(consoleLines, line)
     while #consoleLines > MAX_CONSOLE_LINES do
@@ -42,7 +40,7 @@ local _originalWarn = warn
 local function _flattenArgs(...)
     local parts = {}
     for i = 1, select("#", ...) do
-        table.insert(parts, tostring(select(i, ...)))
+        table.insert(parts, tostring((select(i, ...))))
     end
     return table.concat(parts, "\t")
 end
@@ -94,11 +92,11 @@ end
 
 local savedSettings = tryLoadSettings() or {}
 
--- ─────────── STATE (with saved overrides) ───────────
+-- ─────────── STATE ───────────
 local fillDelay         = savedSettings.fillDelay or 0.15
 local filterMinY        = savedSettings.filterMinY or 0
 local filterMaxY        = savedSettings.filterMaxY or 1000
-local selectedTreeClass = savedSettings.selectedTreeClass  -- can be nil
+local selectedTreeClass = savedSettings.selectedTreeClass
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
 local selectedBaseOwner = savedSettings.selectedBaseOwner
@@ -112,7 +110,6 @@ local fireEveryFrame     = savedSettings.fireEveryFrame or false
 local fireOnceOnly       = savedSettings.fireOnceOnly or false
 local fireSignature      = savedSettings.fireSignature or 1
 
--- restore player names if we saved them
 local function resolvePlayer(name)
     if not name or name == "" or name == "(Me)" then return plr end
     return Players:FindFirstChild(name) or plr
@@ -199,7 +196,6 @@ local function startFly()
                 dir = dir + Vector3.new(0, -1, 0)
             end
 
-            -- Mobile up/down buttons
             if flyUpBtn and flyUpBtn:GetAttribute("Pressed") then
                 dir = dir + Vector3.new(0, 1, 0)
             end
@@ -601,12 +597,22 @@ local function getBasePosition(playerName)
     return sum / #positions
 end
 
+-- These are defined early but only called from button handlers,
+-- so setStatus (defined later) will exist by the time they run.
+local _setStatusRef = nil
+
 local function tpToClosestBP()
     local char = plr.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then setStatus and setStatus("No character") return end
+    if not root then
+        if _setStatusRef then _setStatusRef("No character") end
+        return
+    end
     local bps = collectBlueprints()
-    if #bps == 0 then setStatus and setStatus("No blueprints") return end
+    if #bps == 0 then
+        if _setStatusRef then _setStatusRef("No blueprints") end
+        return
+    end
     local nearest, nearestDist = nil, math.huge
     for _, bp in ipairs(bps) do
         local c = blueprintCenter(bp)
@@ -618,21 +624,35 @@ local function tpToClosestBP()
             end
         end
     end
-    if not nearest then setStatus and setStatus("No blueprint center") return end
+    if not nearest then
+        if _setStatusRef then _setStatusRef("No blueprint center") end
+        return
+    end
     root.CFrame = CFrame.new(nearest + Vector3.new(0, 5, 0))
-    setStatus and setStatus(string.format("TP'd to closest BP (%.0f studs)", nearestDist))
+    if _setStatusRef then
+        _setStatusRef(string.format("TP'd to closest BP (%.0f studs)", nearestDist))
+    end
 end
 
 local function tpToBase()
     local name = selectedBaseOwner
-    if not name or name == "" then setStatus and setStatus("Pick a base first") return end
+    if not name or name == "" then
+        if _setStatusRef then _setStatusRef("Pick a base first") end
+        return
+    end
     local pos = getBasePosition(name)
-    if not pos then setStatus and setStatus("No base found for " .. name) return end
+    if not pos then
+        if _setStatusRef then _setStatusRef("No base found for " .. name) end
+        return
+    end
     local char = plr.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then setStatus and setStatus("No character") return end
+    if not root then
+        if _setStatusRef then _setStatusRef("No character") end
+        return
+    end
     root.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
-    setStatus and setStatus("TP'd to " .. name .. "'s base")
+    if _setStatusRef then _setStatusRef("TP'd to " .. name .. "'s base") end
 end
 
 -- ─────────── UI ───────────
@@ -669,7 +689,6 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
--- Mobile fly up/down buttons (hidden by default)
 flyUpBtn = Instance.new("TextButton")
 flyUpBtn.Size = UDim2.fromOffset(50, 50)
 flyUpBtn.Position = UDim2.new(1, -70, 1, -130)
@@ -943,7 +962,11 @@ local function makeParagraph(title, desc, order, color)
     d.TextWrapped = true
     d.Parent = frame
 
-    return { setDesc = function(_, txt) d.Text = txt end, setColor = function(_, c) d.TextColor3 = c end, frame = frame }
+    return {
+        setDesc = function(_, txt) d.Text = txt end,
+        setColor = function(_, c) d.TextColor3 = c end,
+        frame = frame,
+    }
 end
 
 local function makeButton(text, desc, onClick, order)
@@ -1383,6 +1406,7 @@ local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
     print("[Status] " .. tostring(text))
 end
+_setStatusRef = setStatus
 
 local function updateCrossWarn()
     if not crossWarnPara then return end
@@ -1394,7 +1418,7 @@ local function updateCrossWarn()
     else
         pcall(function()
             crossWarnPara:setDesc(crossWarnPara,
-                "⚠ Wood source is " .. selectedWoodOwner.Name .. " — grabs may fail without perms.")
+                "WARNING: Wood source is " .. selectedWoodOwner.Name .. " - grabs may fail without perms.")
             crossWarnPara:setColor(crossWarnPara, WARN_RED)
         end)
     end
@@ -1716,7 +1740,6 @@ local function updateInventory()
     setHoldCount()
 end
 
--- ─────────── SAVE / RESET ───────────
 local function collectCurrentSettings()
     return {
         fillDelay = fillDelay,
@@ -1751,13 +1774,11 @@ local function resetSettings()
     if writefile and isfile then
         pcall(function()
             if isfile(SETTINGS_FILE) then
-                -- no delete API guaranteed; overwrite with empty
                 writefile(SETTINGS_FILE, "{}")
             end
         end)
     end
 
-    -- refresh dropdowns
     if playerDropdown then pcall(function() playerDropdown:Set("(Me)") end) end
     if woodOwnerDropdown then pcall(function() woodOwnerDropdown:Set("(Me)") end) end
     if woodTypeDropdown then pcall(function() woodTypeDropdown:Set("(All)") end) end
@@ -1800,7 +1821,7 @@ end, nextOrder())
 
 crossWarnPara = makeParagraph("Wood Source Info",
     selectedWoodOwner == plr and "Wood source: yourself (grabs will work)."
-    or ("⚠ Wood source is " .. selectedWoodOwner.Name .. " — grabs may fail without perms."),
+    or ("WARNING: Wood source is " .. selectedWoodOwner.Name .. " - grabs may fail without perms."),
     nextOrder(),
     selectedWoodOwner == plr and TEXT_GRAY or WARN_RED)
 
@@ -1886,10 +1907,14 @@ makeButton("Release All",
 
 makeSection("HOLD TUNING (WIP ONLY)", nextOrder())
 
-makeDropdown("Fire Signature", getFireSigOptions(), (tostring(fireSignature) .. ") "
-    .. (fireSignature == 1 and "Model only" or fireSignature == 2 and "Model + CFrame"
-    or fireSignature == 3 and "Model + CFrame + true" or fireSignature == 4 and "Model + Vector3"
-    or "Model + Mouse.Hit")), function(opt)
+local fireSigDefaultText
+if fireSignature == 1 then fireSigDefaultText = "1) Model only"
+elseif fireSignature == 2 then fireSigDefaultText = "2) Model + CFrame"
+elseif fireSignature == 3 then fireSigDefaultText = "3) Model + CFrame + true"
+elseif fireSignature == 4 then fireSigDefaultText = "4) Model + Vector3"
+else fireSigDefaultText = "5) Model + Mouse.Hit" end
+
+makeDropdown("Fire Signature", getFireSigOptions(), fireSigDefaultText, function(opt)
     local n = tonumber(string.match(opt, "^(%d+)"))
     if n then
         fireSignature = n
@@ -1918,11 +1943,10 @@ makeToggle("Fire Once Only",
         setStatus(state and "Fire-once mode ON" or "Fire-once mode OFF")
     end, nextOrder())
 
--- NAVIGATION SECTION
 makeSection("NAVIGATION", nextOrder())
 
 makeButton("Fly",
-    "Toggle flight. WASD + Space/Shift on PC. On-screen ▲▼ buttons on mobile.",
+    "Toggle flight. WASD + Space/Shift on PC. On-screen buttons on mobile.",
     function()
         if flying then
             stopFly()
@@ -1935,7 +1959,9 @@ makeButton("Fly",
 
 makeSlider("Fly Speed", 20, 200, flySpeed, function(v)
     flySpeed = v
-    if flyBV then flyBV.Velocity = flyBV.Velocity.Unit * flySpeed end
+    if flyBV and flyBV.Velocity.Magnitude > 0 then
+        flyBV.Velocity = flyBV.Velocity.Unit * flySpeed
+    end
 end, nextOrder())
 
 makeButton("TP to Closest BP",
@@ -1959,7 +1985,6 @@ makeButton("Refresh Bases",
         setStatus("Base list refreshed")
     end, nextOrder())
 
--- CONFIG SECTION
 makeSection("CONFIG", nextOrder())
 
 makeButton("Save Settings",
@@ -1975,10 +2000,10 @@ makeButton("Save Settings",
     end, nextOrder())
 
 makeButton("Reset to Defaults",
-    "Wipe everything back to defaults (does NOT save automatically)",
+    "Wipe everything back to defaults",
     function() resetSettings() end, nextOrder())
 
--- SNIFFER: only visible to the owner
+-- SNIFFER: owner only
 if IS_OWNER then
     makeSection("DEBUG / SNIFFER (owner only)", nextOrder())
 
@@ -2094,7 +2119,11 @@ end, nextOrder())
 makeButton("Copy Console to Clipboard", nil, function()
     local all = table.concat(consoleLines, "\n")
     local ok = pcall(function() if setclipboard then setclipboard(all) end end)
-    setStatus(ok and setclipboard and "Copied" or "Clipboard unavailable")
+    if ok and setclipboard then
+        setStatus("Copied")
+    else
+        setStatus("Clipboard unavailable")
+    end
 end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
@@ -2213,9 +2242,7 @@ end)
 
 task.spawn(function()
     while gui.Parent do
-        if nearestMode then
-            pcall(fillNearestBlueprint)
-        end
+        if nearestMode then pcall(fillNearestBlueprint) end
         task.wait(math.max(0.5, fillDelay * 3))
     end
 end)
@@ -2225,7 +2252,6 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
--- auto-save every 30s
 task.spawn(function()
     while gui.Parent do
         task.wait(30)
