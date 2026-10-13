@@ -1,29 +1,37 @@
-print("TEST 1 - script is running")
+makeSection("DEBUG / SNIFFER", nextOrder())
 
-local Players = game:GetService("Players")
-local plr = Players.LocalPlayer
+local sniffToggleHandle = nil
+local sniffInstalledPara = nil
+local sniffInstalled = installDragSniffer()
 
-print("TEST 2 - player:", plr.Name)
+sniffInstalledPara = makeParagraph("Sniffer Status",
+    sniffInstalled and "Installed on ClientIsDragging" or "FAILED - remote not found",
+    nextOrder())
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "BPFTestGui"
-gui.ResetOnSpawn = false
-gui.Parent = plr:WaitForChild("PlayerGui")
+sniffToggleHandle = makeToggle("Sniff Drag Remote",
+    "When ON, every call to ClientIsDragging:FireServer is printed with args",
+    false,
+    function(state)
+        _G._BPFDragSniffing = state
+        if state then
+            print("=== SNIFFER ON ===")
+            print("Now manually drag a plank in-game. The args the game sends")
+            print("will print to this output. Copy them and paste them here.")
+            setStatus("Sniffer ON - drag a plank now")
+        else
+            print("=== SNIFFER OFF ===")
+            setStatus("Sniffer OFF")
+        end
+    end, nextOrder())
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(200, 80)
-frame.Position = UDim2.new(0.5, -100, 0.5, -40)
-frame.BackgroundColor3 = Color3.fromRGB(120, 80, 255)
-frame.Parent = gui
-
-local label = Instance.new("TextLabel")
-label.Size = UDim2.new(1, 0, 1, 0)
-label.BackgroundTransparency = 1
-label.Text = "If you see this, execution works"
-label.TextColor3 = Color3.new(1, 1, 1)
-label.Font = Enum.Font.GothamBold
-label.TextSize = 12
-label.TextWrapped = true
-label.Parent = frame
-
-print("TEST 3 - gui created. If you see a purple box, execution is fine.")
+makeButton("Reinstall Sniffer",
+    "Re-hooks ClientIsDragging in case the remote got replaced",
+    function()
+        _G._BPFDragSnifferInstalled = false
+        local ok = installDragSniffer()
+        pcall(function()
+            sniffInstalledPara:setDesc(sniffInstalledPara,
+                ok and "Installed on ClientIsDragging" or "FAILED - remote not found")
+        end)
+        setStatus(ok and "Sniffer reinstalled" or "Sniffer failed")
+    end, nextOrder())
