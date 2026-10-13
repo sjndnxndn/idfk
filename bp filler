@@ -1,7 +1,10 @@
+-- v0.0
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
+
+local VERSION = "0.0"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,7 +14,6 @@ local RS2 = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
 
--- Only remote we need. Spamming it = keeping the item held.
 local Interaction = RS2:WaitForChild("Interaction", 10)
 local ClientIsDragging = nil
 if Interaction then
@@ -29,10 +31,15 @@ local selectedTreeClass = nil
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
 
--- Hold state: [model] = { part, goalCF, lastFire }
-local heldPlanks        = {}
-local HOLD_FIRE_INTERVAL = 0.03    -- seconds between spam fires per plank
-local spamEveryFrame     = false   -- if true, fire on every render step
+local heldPlanks         = {}
+local HOLD_FIRE_INTERVAL = 0.1
+local fireEveryFrame     = false
+local fireOnceOnly       = false
+
+-- Per-mode hold toggles
+local autoFillHold = true
+local loopHold     = true
+local clickHold    = true
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -133,11 +140,6 @@ local function blueprintCenter(model)
 end
 
 -- ─────────── HOLD SYSTEM ───────────
--- The way LT2 works: ClientIsDragging:FireServer(model) tells the server
--- "I'm dragging this item". The server times out that state quickly unless
--- it keeps receiving fires. So to "hold" wood inside a blueprint, we
--- continuously spam this remote while forcing the part's CFrame.
-
 local function fireDrag(model)
     if not ClientIsDragging then return end
     pcall(function() ClientIsDragging:FireServer(model) end)
@@ -168,30 +170,7 @@ local function holdCount()
     return n
 end
 
--- The ticker: constantly re-fire ClientIsDragging + re-apply CFrame
-task.spawn(function()
-    while gui == nil or (gui and gui.Parent) do
-        local now = tick()
-        local fireAll = spamEveryFrame
-        for model, data in pairs(heldPlanks) do
-            if not model.Parent or not data.part.Parent then
-                heldPlanks[model] = nil
-            else
-                if fireAll or (now - data.lastFire >= HOLD_FIRE_INTERVAL) then
-                    data.lastFire = now
-                    fireDrag(model)
-                end
-                if data.part.Parent then
-                    data.part.CFrame = data.goalCF
-                end
-            end
-        end
-        RunService.RenderStepped:Wait()
-        if gui and not gui.Parent then break end
-    end
-end)
-
--- ─────────── GRAB / HOLD PRIMITIVE ───────────
+-- ─────────── GRAB PRIMITIVE ───────────
 local function quickGrab(model, timeout)
     timeout = timeout or 0.8
     if not model or not model.Parent then return false end
@@ -236,6 +215,27 @@ local function movePlayerNear(root, targetPart)
     end
 end
 
+-- Teleport-and-release (non-hold)
+local function teleportInBlueprint(bp, plankEntry, root)
+    if not bp or not bp.Parent then return false, "no bp" end
+    if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
+        return false, "no plank"
+    end
+    local center = blueprintCenter(bp)
+    if not center then return false, "no center" end
+    local goalCF = CFrame.new(center)
+
+    movePlayerNear(root, plankEntry.part)
+    local got = quickGrab(plankEntry.model, 0.8)
+    if not got then return false, "grab failed" end
+
+    if plankEntry.part and plankEntry.part.Parent then
+        plankEntry.part.CFrame = goalCF
+    end
+    return true, "teleported"
+end
+
+-- Grab and keep-holding
 local function holdInBlueprint(bp, plankEntry, root)
     if not bp or not bp.Parent then return false, "no bp" end
     if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
@@ -256,7 +256,6 @@ local function holdInBlueprint(bp, plankEntry, root)
     local goalCF = CFrame.new(center)
 
     movePlayerNear(root, plankEntry.part)
-
     local got = quickGrab(plankEntry.model, 0.8)
     if not got then return false, "grab failed" end
 
@@ -340,6 +339,7 @@ local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 
+-- Floating toggle
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
 toggleBtn.Size = UDim2.fromOffset(40, 40)
@@ -357,7 +357,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 500
+local panelW, panelH = 320, 520
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -365,7 +365,7 @@ panel.Position = UDim2.new(0.5, -panelW / 2, 0.5, -panelH / 2)
 panel.BackgroundColor3 = BG_DARK
 panel.BorderSizePixel = 0
 panel.Active = true
-panel.Draggable = true
+panel.Draggable = false   -- IMPORTANT: disabled so sliders don't drag the panel
 panel.ClipsDescendants = true
 panel.Visible = true
 panel.Parent = gui
@@ -375,6 +375,7 @@ pStroke.Color = ACCENT
 pStroke.Thickness = 2
 
 local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 36)
 titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 titleBar.BorderSizePixel = 0
@@ -385,7 +386,7 @@ local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(1, -100, 1, 0)
 titleLbl.Position = UDim2.fromOffset(12, 0)
 titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "Blueprint Filler"
+titleLbl.Text = "Blueprint Filler v" .. VERSION
 titleLbl.TextColor3 = TEXT_WHITE
 titleLbl.Font = Enum.Font.GothamBold
 titleLbl.TextSize = 14
@@ -417,7 +418,7 @@ closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
 local body = Instance.new("ScrollingFrame")
-body.Size = UDim2.new(1, -16, 1, -46)
+body.Size = UDim2.new(1, -28, 1, -46)
 body.Position = UDim2.fromOffset(8, 40)
 body.BackgroundTransparency = 1
 body.BorderSizePixel = 0
@@ -435,6 +436,7 @@ local padding = Instance.new("UIPadding", body)
 padding.PaddingTop = UDim.new(0, 6)
 padding.PaddingBottom = UDim.new(0, 6)
 
+-- Resize handle
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(16, 16)
 resizeHandle.Position = UDim2.new(1, -20, 1, -20)
@@ -455,6 +457,70 @@ for i = 1, 3 do
     line.Parent = resizeHandle
 end
 
+-- Side grip for dragging the panel
+local sideGrip = Instance.new("TextButton")
+sideGrip.Name = "SideGrip"
+sideGrip.Size = UDim2.new(0, 14, 1, -20)
+sideGrip.Position = UDim2.new(1, -18, 0, 10)
+sideGrip.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+sideGrip.BorderSizePixel = 0
+sideGrip.Text = ""
+sideGrip.AutoButtonColor = false
+sideGrip.ZIndex = 55
+sideGrip.Parent = panel
+Instance.new("UICorner", sideGrip).CornerRadius = UDim.new(0, 5)
+local sgStroke = Instance.new("UIStroke", sideGrip)
+sgStroke.Color = Color3.fromRGB(55, 55, 70)
+sgStroke.Thickness = 1
+
+for i = 1, 5 do
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.fromOffset(4, 4)
+    dot.Position = UDim2.new(0.5, -2, 0, 12 + (i - 1) * 12)
+    dot.BackgroundColor3 = TEXT_GRAY
+    dot.BorderSizePixel = 0
+    dot.Parent = sideGrip
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+end
+
+-- Manual drag on the title bar and side grip
+local function makeDragHandle(frame)
+    local dragging = false
+    local dragStart, startPos
+
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = panel.Position
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - dragStart
+            panel.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+makeDragHandle(titleBar)
+makeDragHandle(sideGrip)
+
+-- ─────────── UI FACTORY ───────────
 local ROW_SECTION  = 20
 local ROW_PARA     = 38
 local ROW_BTN      = 34
@@ -740,24 +806,26 @@ local function makeSlider(text, min, max, default, onChange, order)
         if not ok then warn("[BPFiller] slider error: " .. tostring(err)) end
     end
 
+    -- Track click+drag starts on the row itself (the track is too thin)
     frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             setFromX(input.Position.X)
         end
     end)
-    frame.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
+
     UIS.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
             setFromX(input.Position.X)
         end
     end)
+
     UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
@@ -909,6 +977,43 @@ UIS.InputBegan:Connect(function(input, gp)
     for _, dd in ipairs(openDropdowns) do dd:close() end
 end)
 
+-- ─────────── HOLD TICKER ───────────
+-- Fires ClientIsDragging to keep ownership alive, and re-applies CFrame
+-- every frame so the plank visually stays inside the blueprint.
+task.spawn(function()
+    while gui and gui.Parent do
+        local now = tick()
+        for model, data in pairs(heldPlanks) do
+            if not model.Parent or not data.part.Parent then
+                heldPlanks[model] = nil
+            else
+                -- Re-apply CFrame every frame
+                if data.part.Parent then
+                    data.part.CFrame = data.goalCF
+                end
+
+                -- Fire the drag remote to keep ownership alive
+                if not fireOnceOnly then
+                    if fireEveryFrame then
+                        data.lastFire = now
+                        fireDrag(model)
+                        if data.part.Parent then
+                            data.part.CFrame = data.goalCF
+                        end
+                    elseif now - data.lastFire >= HOLD_FIRE_INTERVAL then
+                        data.lastFire = now
+                        fireDrag(model)
+                        if data.part.Parent then
+                            data.part.CFrame = data.goalCF
+                        end
+                    end
+                end
+            end
+        end
+        RunService.RenderStepped:Wait()
+    end
+end)
+
 -- ─────────── LOGIC ───────────
 local statusPara = nil
 local inventoryPara = nil
@@ -961,6 +1066,15 @@ local function getWoodTypeOptions(discovered)
     return opts
 end
 
+-- Core fill dispatcher: either hold or teleport
+local function doFill(bp, plankEntry, root, useHold)
+    if useHold then
+        return holdInBlueprint(bp, plankEntry, root)
+    else
+        return teleportInBlueprint(bp, plankEntry, root)
+    end
+end
+
 local function fillAllBlueprints()
     if autoFillRunning then
         autoFillCancel = true
@@ -982,7 +1096,8 @@ local function fillAllBlueprints()
 
     autoFillRunning = true
     autoFillCancel = false
-    setStatus(string.format("Holding %d planks in %d blueprints", #pl, #bps))
+    local mode = autoFillHold and "HOLD" or "TP"
+    setStatus(string.format("Auto Fill [%s]: %d bps, %d planks", mode, #bps, #pl))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -997,8 +1112,14 @@ local function fillAllBlueprints()
             for _ = 1, #pl do
                 local e = pl[plankIdx]
                 plankIdx = (plankIdx % #pl) + 1
-                if e.part and e.part.Parent and not heldPlanks[e.model] then
-                    plankEntry = e; break
+                if e.part and e.part.Parent then
+                    if autoFillHold then
+                        if not heldPlanks[e.model] then
+                            plankEntry = e; break
+                        end
+                    else
+                        plankEntry = e; break
+                    end
                 end
             end
             if not plankEntry then
@@ -1006,15 +1127,15 @@ local function fillAllBlueprints()
                 break
             end
 
-            setStatus(string.format("Holding %d/%d (%s)", i, #bps, bp.Name))
-            local ok = holdInBlueprint(bp, plankEntry, root)
+            setStatus(string.format("%s %d/%d (%s)", mode, i, #bps, bp.Name))
+            local ok = doFill(bp, plankEntry, root, autoFillHold)
             if ok then filled += 1 else failed += 1 end
             setHoldCount()
             task.wait(fillDelay)
         end
 
         autoFillRunning = false
-        setStatus(string.format("Done: %d held, %d failed", filled, failed))
+        setStatus(string.format("Done: %d filled, %d failed", filled, failed))
     end)
 end
 
@@ -1034,6 +1155,7 @@ local function loopTick()
         local pl = collectMatchingPlanks()
         local plankIdx = 1
         local filled = 0
+        local mode = loopHold and "HOLD" or "TP"
 
         for _, bp in ipairs(bps) do
             if not loopMode then break end
@@ -1042,18 +1164,24 @@ local function loopTick()
             for _ = 1, #pl do
                 local e = pl[plankIdx]
                 plankIdx = (plankIdx % math.max(1, #pl)) + 1
-                if e.part and e.part.Parent and not heldPlanks[e.model] then
-                    plankEntry = e; break
+                if e.part and e.part.Parent then
+                    if loopHold then
+                        if not heldPlanks[e.model] then
+                            plankEntry = e; break
+                        end
+                    else
+                        plankEntry = e; break
+                    end
                 end
             end
             if not plankEntry then break end
-            setStatus(string.format("Loop: holding %s", bp.Name))
-            if holdInBlueprint(bp, plankEntry, root) then filled += 1 end
+            setStatus(string.format("Loop [%s]: %s", mode, bp.Name))
+            if doFill(bp, plankEntry, root, loopHold) then filled += 1 end
             setHoldCount()
             task.wait(fillDelay)
         end
         loopRunning = false
-        setStatus(string.format("Loop pass: %d held", filled))
+        setStatus(string.format("Loop pass: %d filled", filled))
     end)
 end
 
@@ -1088,12 +1216,13 @@ local function startClickMode()
         end
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
         local entry = pl[1]
-        setStatus("Click-hold: " .. node.Name)
+        local mode = clickHold and "HOLD" or "TP"
+        setStatus(string.format("Click [%s]: %s", mode, node.Name))
         task.spawn(function()
-            local ok = holdInBlueprint(node, entry, root)
+            local ok = doFill(node, entry, root, clickHold)
             setHoldCount()
-            if ok then setStatus("Held in " .. node.Name)
-            else setStatus("Hold failed") end
+            if ok then setStatus("Filled " .. node.Name)
+            else setStatus("Fill failed") end
         end)
     end)
 end
@@ -1206,32 +1335,56 @@ end, nextOrder())
 
 makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
 
-makeSection("HOLD MODE", nextOrder())
+makeSection("MODES", nextOrder())
 
-clickToggleHandle = makeToggle("Click to Fill (Hold)",
-    "Click a blueprint to grab and hold a matching plank inside it",
-    false,
-    function(state)
-        if state then startClickMode() else stopClickMode() end
-        setStatus(state and "Click-hold ON" or "Click-hold OFF")
-    end, nextOrder())
-
-makeButton("Auto Fill All (Hold)",
-    "Grab and hold a matching plank in every target blueprint",
+makeButton("Auto Fill All",
+    "One-shot fill of every target blueprint",
     function() fillAllBlueprints() end, nextOrder())
 
-makeToggle("Loop Mode (Hold)",
-    "Continuously scan and hold planks as new planks appear",
+makeToggle("  ↳ Auto Fill uses HOLD",
+    "ON = keep planks held inside blueprints. OFF = teleport and release.",
+    true,
+    function(state)
+        autoFillHold = state
+        setStatus("Auto Fill: " .. (state and "HOLD" or "TP"))
+    end, nextOrder())
+
+makeToggle("Loop Mode",
+    "Continuously fill blueprints as new planks appear",
     false,
     function(state)
         loopMode = state
-        setStatus(state and "Loop-hold ON" or "Loop-hold OFF")
+        setStatus(state and "Loop ON" or "Loop OFF")
+    end, nextOrder())
+
+makeToggle("  ↳ Loop uses HOLD",
+    "ON = keep planks held. OFF = teleport and release.",
+    true,
+    function(state)
+        loopHold = state
+        setStatus("Loop: " .. (state and "HOLD" or "TP"))
+    end, nextOrder())
+
+clickToggleHandle = makeToggle("Click to Fill",
+    "Click a blueprint to fill it with one matching plank",
+    false,
+    function(state)
+        if state then startClickMode() else stopClickMode() end
+        setStatus(state and "Click ON" or "Click OFF")
+    end, nextOrder())
+
+makeToggle("  ↳ Click uses HOLD",
+    "ON = keep plank held. OFF = teleport and release.",
+    true,
+    function(state)
+        clickHold = state
+        setStatus("Click: " .. (state and "HOLD" or "TP"))
     end, nextOrder())
 
 holdCountPara = makeParagraph("Held Planks", "Currently holding: 0 planks", nextOrder())
 
 makeButton("Release All",
-    "Stop holding every plank (let go of drag state)",
+    "Stop holding every plank",
     function()
         local count = holdCount()
         stopAllHolds()
@@ -1241,17 +1394,25 @@ makeButton("Release All",
 
 makeSection("HOLD TUNING", nextOrder())
 
-makeSlider("Spam Rate (s)", 0.016, 0.2, HOLD_FIRE_INTERVAL, function(v)
+makeSlider("Fire Interval (s)", 0.02, 0.5, HOLD_FIRE_INTERVAL, function(v)
     HOLD_FIRE_INTERVAL = v
-    setStatus(string.format("Spam rate: %.3fs (%.0f/sec)", v, 1/v))
+    setStatus(string.format("Fire rate: %.3fs (%.0f/sec)", v, 1/v))
 end, nextOrder())
 
-makeToggle("Spam Every Frame",
-    "Max hold strength — fire ClientIsDragging every render step (~60/sec per plank)",
+makeToggle("Fire Every Frame",
+    "Max hold strength (fires ClientIsDragging every render frame)",
     false,
     function(state)
-        spamEveryFrame = state
-        setStatus(state and "Frame-spam ON (aggressive)" or "Frame-spam OFF")
+        fireEveryFrame = state
+        setStatus(state and "Frame-spam ON" or "Frame-spam OFF")
+    end, nextOrder())
+
+makeToggle("Fire Once Only",
+    "Only fire ClientIsDragging on grab. No repeat fires afterward.",
+    false,
+    function(state)
+        fireOnceOnly = state
+        setStatus(state and "Fire-once mode ON" or "Fire-once mode OFF")
     end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
@@ -1369,5 +1530,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] Loaded.")
-print("[BPFiller] Drag remote: " .. (ClientIsDragging and ClientIsDragging.Name or "MISSING"))
+print("[BPFiller] v" .. VERSION .. " loaded. Drag the side grip or title bar to move.")
