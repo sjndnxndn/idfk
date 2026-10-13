@@ -1,18 +1,20 @@
--- v0.8
+-- v1.0
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.8"
+local VERSION = "1.0"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local RS2 = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
+local IS_OWNER = (plr.Name == "mejustexploiting")
 
 -- ─────────── IN-UI CONSOLE ───────────
 local consoleLabel = nil
@@ -67,118 +69,60 @@ if Interaction then
     end
 end
 
--- ─────────── DRAG SNIFFER ───────────
--- IMPORTANT: The sniffer is NOT installed by default.
--- Hooking game.__namecall interferes with RemoteEvent:FireServer on Delta.
--- Only install it when you explicitly want to sniff.
-_G._BPFDragSniffing = false
-_G._BPFSnifferInstalled = false
-_G._BPFOriginalNamecall = nil
+-- ─────────── SETTINGS PERSISTENCE ───────────
+local SETTINGS_FILE = "bpfiller_settings.json"
 
-local function logArgs(tag, args)
-    print(string.format("[SNIFF] %s  argCount=%d", tag, #args))
-    for i = 1, #args do
-        local v = args[i]
-        print(string.format("   [%d] type=%s  value=%s", i, typeof(v), tostring(v)))
-        if typeof(v) == "CFrame" then
-            print("       pos=" .. tostring(v.Position))
-        elseif typeof(v) == "Vector3" then
-            print("       xyz=" .. tostring(v))
-        elseif typeof(v) == "Instance" then
-            print("       name=" .. v.Name .. "  class=" .. v.ClassName)
-        end
-    end
+local function trySaveSettings(data)
+    if not writefile then return false, "writefile unavailable" end
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
+    if not ok then return false, "encode failed" end
+    local ok2, err = pcall(writefile, SETTINGS_FILE, encoded)
+    if not ok2 then return false, tostring(err) end
+    return true
 end
 
-local function installDragSniffer()
-    if not ClientIsDragging then return false, "remote not found" end
-    if _G._BPFSnifferInstalled then return true, "already installed" end
-
-    if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
-        local ok, err = pcall(function()
-            local oldNamecall
-            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-                if not _G._BPFDragSniffing then
-                    return oldNamecall(self, ...)
-                end
-                local method = getnamecallmethod()
-                if self == ClientIsDragging then
-                    logArgs("ClientIsDragging:" .. tostring(method), { ... })
-                end
-                return oldNamecall(self, ...)
-            end)
-            _G._BPFOriginalNamecall = oldNamecall
-        end)
-        if ok then
-            _G._BPFSnifferInstalled = true
-            return true, "hookmetamethod (__namecall)"
-        else
-            return false, "hookmetamethod failed: " .. tostring(err)
-        end
-    end
-
-    if type(getrawmetatable) == "function" then
-        local ok, err = pcall(function()
-            local mt = getrawmetatable(game)
-            local oldNamecall = mt.__namecall
-            if setreadonly then setreadonly(mt, false) end
-            mt.__namecall = function(self, ...)
-                if not _G._BPFDragSniffing then
-                    return oldNamecall(self, ...)
-                end
-                local method = getnamecallmethod and getnamecallmethod() or ""
-                if self == ClientIsDragging then
-                    logArgs("ClientIsDragging:" .. tostring(method), { ... })
-                end
-                return oldNamecall(self, ...)
-            end
-            if setreadonly then setreadonly(mt, true) end
-            _G._BPFOriginalNamecall = oldNamecall
-        end)
-        if ok then
-            _G._BPFSnifferInstalled = true
-            return true, "getrawmetatable (__namecall)"
-        else
-            return false, "getrawmetatable failed: " .. tostring(err)
-        end
-    end
-
-    return false, "no hook method available"
+local function tryLoadSettings()
+    if not readfile or not isfile then return nil end
+    local ok, exists = pcall(isfile, SETTINGS_FILE)
+    if not ok or not exists then return nil end
+    local ok2, contents = pcall(readfile, SETTINGS_FILE)
+    if not ok2 then return nil end
+    local ok3, data = pcall(function() return HttpService:JSONDecode(contents) end)
+    if not ok3 then return nil end
+    return data
 end
 
-local function reportCapabilities()
-    local lines = {}
-    local function chk(name)
-        local t = type(_G[name])
-        table.insert(lines, name .. " = " .. (t == "function" and "YES" or "no"))
-    end
-    chk("hookmetamethod")
-    chk("hookfunction")
-    chk("getrawmetatable")
-    chk("setreadonly")
-    chk("getnamecallmethod")
-    chk("newcclosure")
-    print("=== Executor Capabilities ===")
-    for _, l in ipairs(lines) do print("  " .. l) end
-    print("=============================")
-end
+local savedSettings = tryLoadSettings() or {}
 
--- ─────────── STATE ───────────
-local fillDelay         = 0.15
-local filterMinY        = 0
-local filterMaxY        = 1000
-local selectedTreeClass = nil
+-- ─────────── STATE (with saved overrides) ───────────
+local fillDelay         = savedSettings.fillDelay or 0.15
+local filterMinY        = savedSettings.filterMinY or 0
+local filterMaxY        = savedSettings.filterMaxY or 1000
+local selectedTreeClass = savedSettings.selectedTreeClass  -- can be nil
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
+local selectedBaseOwner = savedSettings.selectedBaseOwner
 
-local fillMethod        = "Working"
+local fillMethod        = savedSettings.fillMethod or "Testing/WIP"
 local fillMethodLabels  = { "Working (teleport)", "Testing/WIP (hold)" }
 
 local heldPlanks         = {}
-local HOLD_FIRE_INTERVAL = 0.5
-local fireEveryFrame     = false
-local fireOnceOnly       = false
-local fireSignature      = 1
+local HOLD_FIRE_INTERVAL = savedSettings.holdFireInterval or 0.5
+local fireEveryFrame     = savedSettings.fireEveryFrame or false
+local fireOnceOnly       = savedSettings.fireOnceOnly or false
+local fireSignature      = savedSettings.fireSignature or 1
+
+-- restore player names if we saved them
+local function resolvePlayer(name)
+    if not name or name == "" or name == "(Me)" then return plr end
+    return Players:FindFirstChild(name) or plr
+end
+if savedSettings.selectedPlayerName then
+    selectedPlayer = resolvePlayer(savedSettings.selectedPlayerName)
+end
+if savedSettings.selectedWoodOwnerName then
+    selectedWoodOwner = resolvePlayer(savedSettings.selectedWoodOwnerName)
+end
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -192,9 +136,93 @@ local loopMode          = false
 local loopRunning       = false
 local clickMode         = false
 local clickConn         = nil
+local nearestMode       = false
+
+local loopStallCooldown = 0
 
 local SCAN_INTERVAL     = 2
 local lastScanAccum     = 0
+
+-- ─────────── FLY SYSTEM ───────────
+local flying = false
+local flySpeed = 55
+local flyBV = nil
+local flyBG = nil
+local flyUpBtn = nil
+local flyDownBtn = nil
+
+local function stopFly()
+    flying = false
+    if flyBV then pcall(function() flyBV:Destroy() end); flyBV = nil end
+    if flyBG then pcall(function() flyBG:Destroy() end); flyBG = nil end
+    if flyUpBtn then flyUpBtn.Visible = false end
+    if flyDownBtn then flyDownBtn.Visible = false end
+end
+
+local function startFly()
+    local char = plr.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    flying = true
+
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent = hrp
+
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    flyBG.P = 10000
+    flyBG.D = 200
+    flyBG.CFrame = hrp.CFrame
+    flyBG.Parent = hrp
+
+    if flyUpBtn then flyUpBtn.Visible = true end
+    if flyDownBtn then flyDownBtn.Visible = true end
+
+    task.spawn(function()
+        while flying and char.Parent and hrp.Parent do
+            local cam = workspace.CurrentCamera
+            local dir = Vector3.zero
+
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.MoveDirection.Magnitude > 0 then
+                dir = humanoid.MoveDirection
+            end
+
+            if UIS:IsKeyDown(Enum.KeyCode.Space) then
+                dir = dir + Vector3.new(0, 1, 0)
+            end
+            if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
+                dir = dir + Vector3.new(0, -1, 0)
+            end
+
+            -- Mobile up/down buttons
+            if flyUpBtn and flyUpBtn:GetAttribute("Pressed") then
+                dir = dir + Vector3.new(0, 1, 0)
+            end
+            if flyDownBtn and flyDownBtn:GetAttribute("Pressed") then
+                dir = dir + Vector3.new(0, -1, 0)
+            end
+
+            if dir.Magnitude > 0 then
+                flyBV.Velocity = dir.Unit * flySpeed
+            else
+                flyBV.Velocity = Vector3.zero
+            end
+
+            if cam then
+                flyBG.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.CFrame.LookVector)
+            end
+
+            RunService.RenderStepped:Wait()
+        end
+        if flyBV then pcall(function() flyBV:Destroy() end); flyBV = nil end
+        if flyBG then pcall(function() flyBG:Destroy() end); flyBG = nil end
+    end)
+end
 
 -- ─────────── HELPERS ───────────
 local function getPlayerModels()
@@ -518,6 +546,95 @@ local function collectBlueprints()
     return list
 end
 
+-- ─────────── BASE / NAVIGATION HELPERS ───────────
+local function getBaseOwnerOptions()
+    local pm = getPlayerModels()
+    local seen = {}
+    local opts = {}
+    if pm then
+        for _, m in ipairs(pm:GetChildren()) do
+            if m:IsA("Model") then
+                local owner = m:FindFirstChild("Owner")
+                if owner then
+                    local ok, v = pcall(function() return owner.Value end)
+                    if ok and v ~= nil then
+                        local name = typeof(v) == "Instance" and v.Name or tostring(v)
+                        if name and name ~= "" and not seen[name] then
+                            seen[name] = true
+                            table.insert(opts, name)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    table.sort(opts, function(a, b) return a:lower() < b:lower() end)
+    return opts
+end
+
+local function getBasePosition(playerName)
+    local pm = getPlayerModels()
+    if not pm or not playerName then return nil end
+    local positions = {}
+    for _, m in ipairs(pm:GetChildren()) do
+        if m:IsA("Model") then
+            local owner = m:FindFirstChild("Owner")
+            if owner then
+                local ok, v = pcall(function() return owner.Value end)
+                if ok and v ~= nil then
+                    local name = typeof(v) == "Instance" and v.Name or tostring(v)
+                    if name == playerName then
+                        local t = m:FindFirstChild("Type")
+                        local typeVal = t and t:IsA("StringValue") and t.Value or ""
+                        if typeVal == "Blueprint" or typeVal == "Base" or typeVal == "Plot" then
+                            local c = blueprintCenter(m)
+                            if c then table.insert(positions, c) end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #positions == 0 then return nil end
+    local sum = Vector3.zero
+    for _, p in ipairs(positions) do sum += p end
+    return sum / #positions
+end
+
+local function tpToClosestBP()
+    local char = plr.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then setStatus and setStatus("No character") return end
+    local bps = collectBlueprints()
+    if #bps == 0 then setStatus and setStatus("No blueprints") return end
+    local nearest, nearestDist = nil, math.huge
+    for _, bp in ipairs(bps) do
+        local c = blueprintCenter(bp)
+        if c then
+            local d = (c - root.Position).Magnitude
+            if d < nearestDist then
+                nearestDist = d
+                nearest = c
+            end
+        end
+    end
+    if not nearest then setStatus and setStatus("No blueprint center") return end
+    root.CFrame = CFrame.new(nearest + Vector3.new(0, 5, 0))
+    setStatus and setStatus(string.format("TP'd to closest BP (%.0f studs)", nearestDist))
+end
+
+local function tpToBase()
+    local name = selectedBaseOwner
+    if not name or name == "" then setStatus and setStatus("Pick a base first") return end
+    local pos = getBasePosition(name)
+    if not pos then setStatus and setStatus("No base found for " .. name) return end
+    local char = plr.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then setStatus and setStatus("No character") return end
+    root.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+    setStatus and setStatus("TP'd to " .. name .. "'s base")
+end
+
 -- ─────────── UI ───────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "BPFillerStandalone"
@@ -533,6 +650,7 @@ local BG_DARK = Color3.fromRGB(15, 15, 20)
 local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
+local WARN_RED = Color3.fromRGB(230, 120, 120)
 
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
@@ -551,7 +669,64 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 580
+-- Mobile fly up/down buttons (hidden by default)
+flyUpBtn = Instance.new("TextButton")
+flyUpBtn.Size = UDim2.fromOffset(50, 50)
+flyUpBtn.Position = UDim2.new(1, -70, 1, -130)
+flyUpBtn.BackgroundColor3 = BG_DARK
+flyUpBtn.BorderSizePixel = 0
+flyUpBtn.Text = "▲"
+flyUpBtn.TextColor3 = TEXT_WHITE
+flyUpBtn.TextSize = 18
+flyUpBtn.Font = Enum.Font.GothamBold
+flyUpBtn.ZIndex = 100
+flyUpBtn.Visible = false
+flyUpBtn.Parent = gui
+Instance.new("UICorner", flyUpBtn).CornerRadius = UDim.new(0, 25)
+local fuStroke = Instance.new("UIStroke", flyUpBtn)
+fuStroke.Color = ACCENT
+fuStroke.Thickness = 2
+
+flyDownBtn = Instance.new("TextButton")
+flyDownBtn.Size = UDim2.fromOffset(50, 50)
+flyDownBtn.Position = UDim2.new(1, -70, 1, -75)
+flyDownBtn.BackgroundColor3 = BG_DARK
+flyDownBtn.BorderSizePixel = 0
+flyDownBtn.Text = "▼"
+flyDownBtn.TextColor3 = TEXT_WHITE
+flyDownBtn.TextSize = 18
+flyDownBtn.Font = Enum.Font.GothamBold
+flyDownBtn.ZIndex = 100
+flyDownBtn.Visible = false
+flyDownBtn.Parent = gui
+Instance.new("UICorner", flyDownBtn).CornerRadius = UDim.new(0, 25)
+local fdStroke = Instance.new("UIStroke", flyDownBtn)
+fdStroke.Color = ACCENT
+fdStroke.Thickness = 2
+
+flyUpBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        flyUpBtn:SetAttribute("Pressed", true)
+    end
+end)
+flyUpBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        flyUpBtn:SetAttribute("Pressed", false)
+    end
+end)
+
+flyDownBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        flyDownBtn:SetAttribute("Pressed", true)
+    end
+end)
+flyDownBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        flyDownBtn:SetAttribute("Pressed", false)
+    end
+end)
+
+local panelW, panelH = 320, 620
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -768,7 +943,7 @@ local function makeParagraph(title, desc, order, color)
     d.TextWrapped = true
     d.Parent = frame
 
-    return { setDesc = function(_, txt) d.Text = txt end, frame = frame }
+    return { setDesc = function(_, txt) d.Text = txt end, setColor = function(_, c) d.TextColor3 = c end, frame = frame }
 end
 
 local function makeButton(text, desc, onClick, order)
@@ -1200,11 +1375,29 @@ local treeLabelPara = nil
 local woodTypeDropdown = nil
 local playerDropdown = nil
 local woodOwnerDropdown = nil
+local baseDropdown = nil
 local holdCountPara = nil
+local crossWarnPara = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
     print("[Status] " .. tostring(text))
+end
+
+local function updateCrossWarn()
+    if not crossWarnPara then return end
+    if selectedWoodOwner == plr then
+        pcall(function()
+            crossWarnPara:setDesc(crossWarnPara, "Wood source: yourself (grabs will work).")
+            crossWarnPara:setColor(crossWarnPara, TEXT_GRAY)
+        end)
+    else
+        pcall(function()
+            crossWarnPara:setDesc(crossWarnPara,
+                "⚠ Wood source is " .. selectedWoodOwner.Name .. " — grabs may fail without perms.")
+            crossWarnPara:setColor(crossWarnPara, WARN_RED)
+        end)
+    end
 end
 
 local function setHoldCount()
@@ -1331,8 +1524,40 @@ local function fillAllBlueprints()
     end)
 end
 
+local function fillNearestBlueprint()
+    local char = plr.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then setStatus("No character"); return end
+    local bps = collectBlueprints()
+    if #bps == 0 then setStatus("No blueprints"); return end
+
+    local nearest, nearestDist = nil, math.huge
+    for _, bp in ipairs(bps) do
+        local c = blueprintCenter(bp)
+        if c then
+            local d = (c - root.Position).Magnitude
+            if d < nearestDist then
+                nearestDist = d
+                nearest = bp
+            end
+        end
+    end
+    if not nearest then setStatus("No blueprint with center"); return end
+
+    local pl = collectMatchingPlanks()
+    if #pl == 0 then setStatus("No matching planks"); return end
+
+    local entry = pl[1]
+    local ok = doFill(nearest, entry, root)
+    setHoldCount()
+    if ok then setStatus(string.format("Filled nearest: %s (%.0f studs)", nearest.Name, nearestDist))
+    else setStatus("Fill nearest failed") end
+end
+
 local function loopTick()
     if loopRunning then return end
+    if tick() < loopStallCooldown then return end
+
     if #collectMatchingPlanks() == 0 then
         setStatus("Loop: waiting for planks...")
         return
@@ -1373,7 +1598,13 @@ local function loopTick()
             task.wait(fillDelay)
         end
         loopRunning = false
-        setStatus(string.format("Loop pass: %d filled", filled))
+
+        if filled == 0 then
+            loopStallCooldown = tick() + 5
+            setStatus("Loop stalled (0 filled) - paused 5s")
+        else
+            setStatus(string.format("Loop pass: %d filled", filled))
+        end
     end)
 end
 
@@ -1481,7 +1712,58 @@ local function updateInventory()
     if woodTypeDropdown then pcall(function() woodTypeDropdown:SetValues(getWoodTypeOptions(byTree)) end) end
     if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
     if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
+    if baseDropdown then pcall(function() baseDropdown:SetValues(getBaseOwnerOptions()) end) end
     setHoldCount()
+end
+
+-- ─────────── SAVE / RESET ───────────
+local function collectCurrentSettings()
+    return {
+        fillDelay = fillDelay,
+        filterMinY = filterMinY,
+        filterMaxY = filterMaxY,
+        selectedTreeClass = selectedTreeClass,
+        selectedPlayerName = selectedPlayer and selectedPlayer.Name or "(Me)",
+        selectedWoodOwnerName = selectedWoodOwner and selectedWoodOwner.Name or "(Me)",
+        selectedBaseOwner = selectedBaseOwner,
+        fillMethod = fillMethod,
+        holdFireInterval = HOLD_FIRE_INTERVAL,
+        fireEveryFrame = fireEveryFrame,
+        fireOnceOnly = fireOnceOnly,
+        fireSignature = fireSignature,
+    }
+end
+
+local function resetSettings()
+    fillDelay = 0.15
+    filterMinY = 0
+    filterMaxY = 1000
+    selectedTreeClass = nil
+    selectedPlayer = plr
+    selectedWoodOwner = plr
+    selectedBaseOwner = nil
+    fillMethod = "Testing/WIP"
+    HOLD_FIRE_INTERVAL = 0.5
+    fireEveryFrame = false
+    fireOnceOnly = false
+    fireSignature = 1
+
+    if writefile and isfile then
+        pcall(function()
+            if isfile(SETTINGS_FILE) then
+                -- no delete API guaranteed; overwrite with empty
+                writefile(SETTINGS_FILE, "{}")
+            end
+        end)
+    end
+
+    -- refresh dropdowns
+    if playerDropdown then pcall(function() playerDropdown:Set("(Me)") end) end
+    if woodOwnerDropdown then pcall(function() woodOwnerDropdown:Set("(Me)") end) end
+    if woodTypeDropdown then pcall(function() woodTypeDropdown:Set("(All)") end) end
+    updateCrossWarn()
+    updateInventory()
+    setStatus("Settings reset to defaults")
 end
 
 -- ─────────── BUILD UI ───────────
@@ -1490,7 +1772,7 @@ local function nextOrder() order += 1; return order end
 
 makeSection("FILL METHOD", nextOrder())
 
-makeDropdown("Mode", fillMethodLabels, "Working (teleport)", function(opt)
+makeDropdown("Mode", fillMethodLabels, fillMethod == "Working" and "Working (teleport)" or "Testing/WIP (hold)", function(opt)
     if opt == "Working (teleport)" then
         fillMethod = "Working"
         setStatus("Mode: Working (teleport)")
@@ -1502,31 +1784,40 @@ end, nextOrder())
 
 makeSection("TARGET", nextOrder())
 
-playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(), "(Me)", function(opt)
+playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(), selectedPlayer.Name or "(Me)", function(opt)
     if opt == "(Me)" then selectedPlayer = plr
     else selectedPlayer = Players:FindFirstChild(opt) or plr end
     setStatus("Blueprint owner: " .. selectedPlayer.Name)
 end, nextOrder())
 
-woodOwnerDropdown = makeDropdown("Use Wood From", getPlayerOptions(), "(Me)", function(opt)
+woodOwnerDropdown = makeDropdown("Use Wood From", getPlayerOptions(), selectedWoodOwner.Name or "(Me)", function(opt)
     if opt == "(Me)" then selectedWoodOwner = plr
     else selectedWoodOwner = Players:FindFirstChild(opt) or plr end
     setStatus("Wood source: " .. selectedWoodOwner.Name)
+    updateCrossWarn()
     updateInventory()
 end, nextOrder())
 
-woodTypeDropdown = makeDropdown("Wood Type", getWoodTypeOptions(nil), "(All)", function(opt)
-    if opt == "(All)" then selectedTreeClass = nil else selectedTreeClass = opt end
-    if treeLabelPara then pcall(function() treeLabelPara:setDesc(treeLabelPara, opt) end) end
-    setStatus("Wood type: " .. opt)
-end, nextOrder())
+crossWarnPara = makeParagraph("Wood Source Info",
+    selectedWoodOwner == plr and "Wood source: yourself (grabs will work)."
+    or ("⚠ Wood source is " .. selectedWoodOwner.Name .. " — grabs may fail without perms."),
+    nextOrder(),
+    selectedWoodOwner == plr and TEXT_GRAY or WARN_RED)
+
+woodTypeDropdown = makeDropdown("Wood Type", getWoodTypeOptions(nil),
+    selectedTreeClass or "(All)", function(opt)
+        if opt == "(All)" then selectedTreeClass = nil else selectedTreeClass = opt end
+        if treeLabelPara then pcall(function() treeLabelPara:setDesc(treeLabelPara, opt) end) end
+        setStatus("Wood type: " .. opt)
+    end, nextOrder())
 
 makeButton("Refresh Players",
-    "Rescan the server for players (both dropdowns update)",
+    "Rescan the server for players (all dropdowns update)",
     function()
         if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
         if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
-        setStatus("Refreshed player lists")
+        if baseDropdown then pcall(function() baseDropdown:SetValues(getBaseOwnerOptions()) end) end
+        setStatus("Refreshed dropdowns")
     end, nextOrder())
 
 makeSection("PLANK SOURCE", nextOrder())
@@ -1535,7 +1826,8 @@ pickBtnHandle = makeButton("Pick Plank",
     "Click a loose plank in the world to set the target wood type",
     function() startPickMode() end, nextOrder())
 
-treeLabelPara = makeParagraph("Selected Wood Type", "None (all types)", nextOrder())
+treeLabelPara = makeParagraph("Selected Wood Type",
+    selectedTreeClass or "None (all types)", nextOrder())
 
 makeInput("Min Y Size", tostring(filterMinY), function(t)
     local n = tonumber(t); if n then filterMinY = n end
@@ -1552,6 +1844,18 @@ makeSection("MODES", nextOrder())
 makeButton("Auto Fill All",
     "One-shot fill of every target blueprint using the current mode",
     function() fillAllBlueprints() end, nextOrder())
+
+makeButton("Fill Nearest BP",
+    "Fill whichever of your blueprints is closest to you right now",
+    function() fillNearestBlueprint() end, nextOrder())
+
+makeToggle("Auto Fill Nearest",
+    "Automatically fill the nearest blueprint every few seconds",
+    false,
+    function(state)
+        nearestMode = state
+        setStatus(state and "Auto-fill-nearest ON" or "Auto-fill-nearest OFF")
+    end, nextOrder())
 
 makeToggle("Loop Mode",
     "Continuously fill blueprints as new planks appear",
@@ -1582,7 +1886,10 @@ makeButton("Release All",
 
 makeSection("HOLD TUNING (WIP ONLY)", nextOrder())
 
-makeDropdown("Fire Signature", getFireSigOptions(), "1) Model only", function(opt)
+makeDropdown("Fire Signature", getFireSigOptions(), (tostring(fireSignature) .. ") "
+    .. (fireSignature == 1 and "Model only" or fireSignature == 2 and "Model + CFrame"
+    or fireSignature == 3 and "Model + CFrame + true" or fireSignature == 4 and "Model + Vector3"
+    or "Model + Mouse.Hit")), function(opt)
     local n = tonumber(string.match(opt, "^(%d+)"))
     if n then
         fireSignature = n
@@ -1597,7 +1904,7 @@ end, nextOrder())
 
 makeToggle("Fire Every Frame",
     "Max hold strength (fires ClientIsDragging every render frame)",
-    false,
+    fireEveryFrame,
     function(state)
         fireEveryFrame = state
         setStatus(state and "Frame-spam ON" or "Frame-spam OFF")
@@ -1605,76 +1912,143 @@ makeToggle("Fire Every Frame",
 
 makeToggle("Fire Once Only",
     "Only fire ClientIsDragging on grab. No repeat fires afterward.",
-    false,
+    fireOnceOnly,
     function(state)
         fireOnceOnly = state
         setStatus(state and "Fire-once mode ON" or "Fire-once mode OFF")
     end, nextOrder())
 
-makeSection("DEBUG / SNIFFER", nextOrder())
+-- NAVIGATION SECTION
+makeSection("NAVIGATION", nextOrder())
 
-local sniffStatusPara = nil
-sniffStatusPara = makeParagraph("Sniffer Status",
-    "Not installed (hooks disabled by default)",
-    nextOrder())
-
-makeButton("Install Sniffer",
-    "Hook ClientIsDragging for sniffing. WARNING: may break teleport until you rejoin.",
+makeButton("Fly",
+    "Toggle flight. WASD + Space/Shift on PC. On-screen ▲▼ buttons on mobile.",
     function()
-        local ok, msg = installDragSniffer()
-        pcall(function()
-            sniffStatusPara:setDesc(sniffStatusPara,
-                (ok and "Installed: " or "FAILED: ") .. tostring(msg))
-        end)
-        setStatus(ok and "Sniffer installed" or ("Sniffer failed: " .. tostring(msg)))
-    end, nextOrder())
-
-makeToggle("Sniff Drag Remote",
-    "Only works after clicking Install Sniffer above",
-    false,
-    function(state)
-        if state and not _G._BPFSnifferInstalled then
-            setStatus("Install the sniffer first")
-            return
-        end
-        _G._BPFDragSniffing = state
-        if state then
-            print("=== SNIFFER ON ===")
-            print("Manually drag a plank in-game now.")
-            setStatus("Sniffer ON")
+        if flying then
+            stopFly()
+            setStatus("Fly OFF")
         else
-            print("=== SNIFFER OFF ===")
-            setStatus("Sniffer OFF")
+            startFly()
+            setStatus("Fly ON")
         end
     end, nextOrder())
 
-makeButton("Report Executor Capabilities",
-    "Print which hook methods this executor supports",
-    function()
-        reportCapabilities()
-        setStatus("Capabilities printed to console")
+makeSlider("Fly Speed", 20, 200, flySpeed, function(v)
+    flySpeed = v
+    if flyBV then flyBV.Velocity = flyBV.Velocity.Unit * flySpeed end
+end, nextOrder())
+
+makeButton("TP to Closest BP",
+    "Teleport to the nearest blueprint owned by the selected player",
+    function() tpToClosestBP() end, nextOrder())
+
+baseDropdown = makeDropdown("Base (Owner)", getBaseOwnerOptions(),
+    selectedBaseOwner or "(pick one)", function(opt)
+        selectedBaseOwner = opt
+        setStatus("Base target: " .. opt)
     end, nextOrder())
 
-makeButton("Print All Interaction Remotes",
-    "Prints every RemoteEvent/RemoteFunction in Interaction to the console",
+makeButton("TP to Base",
+    "Teleport to the selected player's base",
+    function() tpToBase() end, nextOrder())
+
+makeButton("Refresh Bases",
+    "Rescan PlayerModels for owner entries",
     function()
-        if not Interaction then
-            setStatus("Interaction folder not found")
-            return
+        if baseDropdown then pcall(function() baseDropdown:SetValues(getBaseOwnerOptions()) end) end
+        setStatus("Base list refreshed")
+    end, nextOrder())
+
+-- CONFIG SECTION
+makeSection("CONFIG", nextOrder())
+
+makeButton("Save Settings",
+    "Write current settings to disk (persists across re-executions)",
+    function()
+        local data = collectCurrentSettings()
+        local ok, msg = trySaveSettings(data)
+        if ok then
+            setStatus("Settings saved")
+        else
+            setStatus("Save failed: " .. tostring(msg))
         end
-        print("=== Interaction remotes ===")
-        local n = 0
-        for _, child in ipairs(Interaction:GetChildren()) do
-            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
-                n += 1
-                print(string.format("  [%s] %s", child.ClassName, child.Name))
+    end, nextOrder())
+
+makeButton("Reset to Defaults",
+    "Wipe everything back to defaults (does NOT save automatically)",
+    function() resetSettings() end, nextOrder())
+
+-- SNIFFER: only visible to the owner
+if IS_OWNER then
+    makeSection("DEBUG / SNIFFER (owner only)", nextOrder())
+
+    _G._BPFDragSniffing = false
+    _G._BPFSnifferInstalled = false
+
+    local function logArgs(tag, args)
+        print(string.format("[SNIFF] %s  argCount=%d", tag, #args))
+        for i = 1, #args do
+            local v = args[i]
+            print(string.format("   [%d] type=%s  value=%s", i, typeof(v), tostring(v)))
+        end
+    end
+
+    local function installDragSniffer()
+        if not ClientIsDragging then return false, "remote not found" end
+        if _G._BPFSnifferInstalled then return true, "already installed" end
+        if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
+            local ok = pcall(function()
+                local oldNamecall
+                oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                    if not _G._BPFDragSniffing then return oldNamecall(self, ...) end
+                    local method = getnamecallmethod()
+                    if self == ClientIsDragging then
+                        logArgs("ClientIsDragging:" .. tostring(method), { ... })
+                    end
+                    return oldNamecall(self, ...)
+                end)
+            end)
+            if ok then
+                _G._BPFSnifferInstalled = true
+                return true, "installed"
             end
         end
-        print(string.format("=== %d remotes total ===", n))
-        setStatus("Printed " .. n .. " remotes to console")
+        return false, "no hook available"
+    end
+
+    local sniffStatusPara = makeParagraph("Sniffer Status", "Not installed", nextOrder())
+
+    makeButton("Install Sniffer",
+        "WARNING: may break teleport until rejoin",
+        function()
+            local ok, msg = installDragSniffer()
+            pcall(function()
+                sniffStatusPara:setDesc(sniffStatusPara,
+                    (ok and "Installed: " or "FAILED: ") .. tostring(msg))
+            end)
+            setStatus(ok and "Sniffer installed" or ("Sniffer failed: " .. tostring(msg)))
+        end, nextOrder())
+
+    makeToggle("Sniff Drag Remote", "Log ClientIsDragging calls", false, function(state)
+        if state and not _G._BPFSnifferInstalled then
+            setStatus("Install the sniffer first"); return
+        end
+        _G._BPFDragSniffing = state
+        setStatus(state and "Sniffer ON" or "Sniffer OFF")
     end, nextOrder())
 
--- ─────────── IN-UI CONSOLE ───────────
+    makeButton("Print All Interaction Remotes", "Dump remote names", function()
+        if not Interaction then return end
+        print("=== Interaction remotes ===")
+        for _, c in ipairs(Interaction:GetChildren()) do
+            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                print("  " .. c.ClassName .. ": " .. c.Name)
+            end
+        end
+    end, nextOrder())
+end
+
+-- CONSOLE SECTION
 makeSection("CONSOLE (LIVE OUTPUT)", nextOrder())
 
 local consoleHolder = Instance.new("Frame")
@@ -1712,35 +2086,16 @@ consoleLabel.TextWrapped = true
 consoleLabel.AutomaticSize = Enum.AutomaticSize.Y
 consoleLabel.Parent = consoleScroll
 
-makeButton("Clear Console",
-    "Wipe the live log",
-    function()
-        consoleLines = {}
-        if consoleLabel then
-            consoleLabel.Text = "(cleared)"
-        end
-        print("[Console] cleared by user")
-    end, nextOrder())
+makeButton("Clear Console", "Wipe the live log", function()
+    consoleLines = {}
+    if consoleLabel then consoleLabel.Text = "(cleared)" end
+end, nextOrder())
 
-makeButton("Copy Console to Clipboard",
-    "Copies the entire log so you can paste it elsewhere",
-    function()
-        local all = table.concat(consoleLines, "\n")
-        local ok = pcall(function()
-            if setclipboard then setclipboard(all) end
-        end)
-        if ok and setclipboard then
-            print("[Console] copied " .. #consoleLines .. " lines to clipboard")
-        else
-            print("[Console] clipboard not available in this executor")
-        end
-    end, nextOrder())
-
-makeButton("Log Test Line",
-    "Prints a test message so you can verify the console is working",
-    function()
-        print("[Test] this is a test log line at " .. os.date("%H:%M:%S"))
-    end, nextOrder())
+makeButton("Copy Console to Clipboard", nil, function()
+    local all = table.concat(consoleLines, "\n")
+    local ok = pcall(function() if setclipboard then setclipboard(all) end end)
+    setStatus(ok and setclipboard and "Copied" or "Clipboard unavailable")
+end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
 
@@ -1753,7 +2108,7 @@ end, nextOrder())
 
 makeSection("STATUS", nextOrder())
 
-statusPara = makeParagraph("Status", "Ready - mode: Working (teleport)", nextOrder())
+statusPara = makeParagraph("Status", "Ready - mode: " .. fillMethod, nextOrder())
 
 -- ─────────── MIN / CLOSE / RESIZE ───────────
 local minimized = false
@@ -1780,6 +2135,7 @@ end)
 
 closeBtn.MouseButton1Click:Connect(function()
     stopAllHolds()
+    stopFly()
     gui:Destroy()
     _G._BPFillerGui = nil
 end)
@@ -1820,6 +2176,7 @@ end)
 Players.PlayerAdded:Connect(function()
     if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
     if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
+    if baseDropdown then pcall(function() baseDropdown:SetValues(getBaseOwnerOptions()) end) end
 end)
 
 Players.PlayerRemoving:Connect(function(p)
@@ -1830,9 +2187,11 @@ Players.PlayerRemoving:Connect(function(p)
     if selectedWoodOwner == p then
         selectedWoodOwner = plr
         if woodOwnerDropdown then pcall(function() woodOwnerDropdown:Set("(Me)") end) end
+        updateCrossWarn()
     end
     if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
     if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
+    if baseDropdown then pcall(function() baseDropdown:SetValues(getBaseOwnerOptions()) end) end
 end)
 
 -- ─────────── BACKGROUND ───────────
@@ -1853,8 +2212,30 @@ task.spawn(function()
 end)
 
 task.spawn(function()
+    while gui.Parent do
+        if nearestMode then
+            pcall(fillNearestBlueprint)
+        end
+        task.wait(math.max(0.5, fillDelay * 3))
+    end
+end)
+
+task.spawn(function()
     task.wait(0.5)
     pcall(updateInventory)
 end)
 
-print("[BPFiller] v" .. VERSION .. " loaded (no hooks installed).")
+-- auto-save every 30s
+task.spawn(function()
+    while gui.Parent do
+        task.wait(30)
+        local ok = trySaveSettings(collectCurrentSettings())
+        if not ok then break end
+    end
+end)
+
+print("[BPFiller] v" .. VERSION .. " loaded.")
+print("[BPFiller] Mode: " .. fillMethod .. "  |  Owner access: " .. tostring(IS_OWNER))
+if savedSettings and next(savedSettings) then
+    print("[BPFiller] Loaded saved settings.")
+end
