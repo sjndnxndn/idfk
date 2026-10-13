@@ -1,10 +1,10 @@
--- v0.4
+-- v0.5
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.4"
+local VERSION = "0.5"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -14,6 +14,50 @@ local RS2 = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
 
+-- ─────────── IN-UI CONSOLE ───────────
+local consoleLabel = nil
+local consoleLines = {}
+local MAX_CONSOLE_LINES = 300
+local consolePaused = false
+
+local function uiLog(msg)
+    if consolePaused then return end
+    local line = string.format("[%.2f] %s", tick() % 1000, tostring(msg))
+    table.insert(consoleLines, line)
+    while #consoleLines > MAX_CONSOLE_LINES do
+        table.remove(consoleLines, 1)
+    end
+    if consoleLabel then
+        pcall(function()
+            consoleLabel.Text = table.concat(consoleLines, "\n")
+        end)
+    end
+end
+
+local _originalPrint = print
+local _originalWarn = warn
+
+local function _flattenArgs(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        table.insert(parts, tostring(select(i, ...)))
+    end
+    return table.concat(parts, "\t")
+end
+
+print = function(...)
+    local s = _flattenArgs(...)
+    pcall(_originalPrint, s)
+    uiLog(s)
+end
+
+warn = function(...)
+    local s = "WARN: " .. _flattenArgs(...)
+    pcall(_originalWarn, s)
+    uiLog(s)
+end
+
+-- ─────────── REMOTE ───────────
 local Interaction = RS2:WaitForChild("Interaction", 10)
 local ClientIsDragging = nil
 if Interaction then
@@ -40,8 +84,7 @@ local function installDragSniffer()
                 print(string.format("[SNIFF] ClientIsDragging:FireServer  argCount=%d", #args))
                 for i = 1, #args do
                     local v = args[i]
-                    local line = string.format("   [%d] type=%s  value=%s", i, typeof(v), tostring(v))
-                    print(line)
+                    print(string.format("   [%d] type=%s  value=%s", i, typeof(v), tostring(v)))
                     if typeof(v) == "CFrame" then
                         print("       pos=" .. tostring(v.Position))
                     elseif typeof(v) == "Vector3" then
@@ -78,8 +121,7 @@ local heldPlanks         = {}
 local HOLD_FIRE_INTERVAL = 0.1
 local fireEveryFrame     = false
 local fireOnceOnly       = false
-
-local fireSignature = 2
+local fireSignature      = 2
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -179,7 +221,7 @@ local function blueprintCenter(model)
     return nil
 end
 
--- ─────────── WORKING: verbatim from original file ───────────
+-- ─────────── WORKING: verbatim from original ───────────
 local function grabOwnership(model, timeout)
     timeout = timeout or 1.0
     if not model or not model.Parent then return false end
@@ -251,14 +293,6 @@ local function fillOneBlueprint(bp, plankEntry, root)
 end
 
 -- ─────────── WIP/HOLD ───────────
-local SIGNATURE_LABELS = {
-    [1] = "Model only",
-    [2] = "Model + CFrame",
-    [3] = "Model + CFrame + true",
-    [4] = "Model + Vector3",
-    [5] = "Model + Mouse.Hit",
-}
-
 local function fireDrag(model, goalCF)
     if not ClientIsDragging then return end
     if fireSignature == 1 then
@@ -460,7 +494,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 560
+local panelW, panelH = 320, 580
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -1113,7 +1147,7 @@ local holdCountPara = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
-    print("[BPFiller] " .. tostring(text))
+    print("[Status] " .. tostring(text))
 end
 
 local function setHoldCount()
@@ -1185,20 +1219,20 @@ local function fillAllBlueprints()
 
     local pl = collectMatchingPlanks()
     if #pl == 0 then
-        setStatus("No matching planks (wood from " .. selectedWoodOwner.Name .. ")")
+        setStatus("No matching planks")
         return
     end
 
     local bps = collectBlueprints()
     if #bps == 0 then
-        setStatus("No blueprints found for " .. selectedPlayer.Name)
+        setStatus("No blueprints for " .. selectedPlayer.Name)
         return
     end
 
     autoFillRunning = true
     autoFillCancel = false
     local tag = isHoldMode() and "HOLD" or "TP"
-    setStatus(string.format("Fill [%s]: %d bps / %d planks (%s's wood)", tag, #bps, #pl, selectedWoodOwner.Name))
+    setStatus(string.format("Fill [%s]: %d bps / %d planks", tag, #bps, #pl))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -1372,7 +1406,7 @@ local function updateInventory()
     local byTree, total = scanPlanks()
     if inventoryPara then
         if total == 0 then
-            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks for " .. selectedWoodOwner.Name .. ")") end)
+            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks available)") end)
         else
             local parts = {}
             for tc, data in pairs(byTree) do
@@ -1408,10 +1442,6 @@ makeDropdown("Mode", fillMethodLabels, "Working (teleport)", function(opt)
         setStatus("Mode: Testing/WIP (hold)")
     end
 end, nextOrder())
-
-makeParagraph("Mode Info",
-    "Working = original teleport. Testing/WIP = experimental hold.",
-    nextOrder())
 
 makeSection("TARGET", nextOrder())
 
@@ -1505,7 +1535,7 @@ end, nextOrder())
 
 makeSlider("Fire Interval (s)", 0.02, 0.5, HOLD_FIRE_INTERVAL, function(v)
     HOLD_FIRE_INTERVAL = v
-    setStatus(string.format("Fire rate: %.3fs (%.0f/sec)", v, 1/v))
+    setStatus(string.format("Fire rate: %.3fs", v))
 end, nextOrder())
 
 makeToggle("Fire Every Frame",
@@ -1533,13 +1563,13 @@ sniffStatusPara = makeParagraph("Sniffer Status",
     nextOrder())
 
 makeToggle("Sniff Drag Remote",
-    "When ON, every ClientIsDragging fire gets printed to the console",
+    "When ON, every ClientIsDragging fire gets printed to the UI console",
     false,
     function(state)
         _G._BPFDragSniffing = state
         if state then
             print("=== SNIFFER ON ===")
-            print("Manually drag a plank in-game now. Check output for args.")
+            print("Manually drag a plank in-game now. Check the console below.")
             setStatus("Sniffer ON - drag a plank in game now")
         else
             print("=== SNIFFER OFF ===")
@@ -1576,6 +1606,74 @@ makeButton("Print All Interaction Remotes",
         end
         print(string.format("=== %d remotes total ===", n))
         setStatus("Printed " .. n .. " remotes to console")
+    end, nextOrder())
+
+-- ─────────── IN-UI CONSOLE ───────────
+makeSection("CONSOLE (LIVE OUTPUT)", nextOrder())
+
+local consoleHolder = Instance.new("Frame")
+consoleHolder.Size = UDim2.new(1, 0, 0, 180)
+consoleHolder.BackgroundColor3 = Color3.fromRGB(5, 5, 8)
+consoleHolder.BorderSizePixel = 0
+consoleHolder.LayoutOrder = nextOrder()
+consoleHolder.Parent = body
+Instance.new("UICorner", consoleHolder).CornerRadius = UDim.new(0, 6)
+local chStroke = Instance.new("UIStroke", consoleHolder)
+chStroke.Color = Color3.fromRGB(40, 40, 55)
+chStroke.Thickness = 1
+
+local consoleScroll = Instance.new("ScrollingFrame")
+consoleScroll.Size = UDim2.new(1, -8, 1, -8)
+consoleScroll.Position = UDim2.fromOffset(4, 4)
+consoleScroll.BackgroundTransparency = 1
+consoleScroll.BorderSizePixel = 0
+consoleScroll.ScrollBarThickness = 4
+consoleScroll.ScrollBarImageColor3 = ACCENT
+consoleScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+consoleScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+consoleScroll.Parent = consoleHolder
+
+consoleLabel = Instance.new("TextLabel")
+consoleLabel.Size = UDim2.new(1, -4, 0, 0)
+consoleLabel.BackgroundTransparency = 1
+consoleLabel.Text = #consoleLines > 0 and table.concat(consoleLines, "\n") or "(no output yet)"
+consoleLabel.TextColor3 = Color3.fromRGB(180, 220, 180)
+consoleLabel.Font = Enum.Font.Code
+consoleLabel.TextSize = 10
+consoleLabel.TextXAlignment = Enum.TextXAlignment.Left
+consoleLabel.TextYAlignment = Enum.TextYAlignment.Top
+consoleLabel.TextWrapped = true
+consoleLabel.AutomaticSize = Enum.AutomaticSize.Y
+consoleLabel.Parent = consoleScroll
+
+makeButton("Clear Console",
+    "Wipe the live log",
+    function()
+        consoleLines = {}
+        if consoleLabel then
+            consoleLabel.Text = "(cleared)"
+        end
+        print("[Console] cleared by user")
+    end, nextOrder())
+
+makeButton("Copy Console to Clipboard",
+    "Copies the entire log so you can paste it elsewhere",
+    function()
+        local all = table.concat(consoleLines, "\n")
+        local ok = pcall(function()
+            if setclipboard then setclipboard(all) end
+        end)
+        if ok and setclipboard then
+            print("[Console] copied " .. #consoleLines .. " lines to clipboard")
+        else
+            print("[Console] clipboard not available in this executor")
+        end
+    end, nextOrder())
+
+makeButton("Log Test Line",
+    "Prints a test message so you can verify the console is working",
+    function()
+        print("[Test] this is a test log line at " .. os.date("%H:%M:%S"))
     end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
