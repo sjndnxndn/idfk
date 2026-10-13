@@ -1,10 +1,10 @@
--- v0.0
+-- v0.1
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.0"
+local VERSION = "0.1"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -35,6 +35,14 @@ local heldPlanks         = {}
 local HOLD_FIRE_INTERVAL = 0.1
 local fireEveryFrame     = false
 local fireOnceOnly       = false
+
+-- Fire signature mode: which args to send to ClientIsDragging:FireServer
+-- 1 = (model)
+-- 2 = (model, cframe)          <-- user-requested variant
+-- 3 = (model, cframe, true)
+-- 4 = (model, vector3)
+-- 5 = (model, mouse.Hit)
+local fireSignature = 2
 
 -- Per-mode hold toggles
 local autoFillHold = true
@@ -139,12 +147,43 @@ local function blueprintCenter(model)
     return nil
 end
 
--- ─────────── HOLD SYSTEM ───────────
-local function fireDrag(model)
+-- ─────────── FIRE SIGNATURES ───────────
+-- The remote might expect different argument shapes. This dispatcher
+-- tries whatever the user selected via the Fire Signature dropdown.
+local SIGNATURE_LABELS = {
+    [1] = "Model only",
+    [2] = "Model + CFrame",
+    [3] = "Model + CFrame + true",
+    [4] = "Model + Vector3",
+    [5] = "Model + Mouse.Hit",
+}
+
+local function fireDrag(model, goalCF)
     if not ClientIsDragging then return end
-    pcall(function() ClientIsDragging:FireServer(model) end)
+
+    if fireSignature == 1 then
+        pcall(function() ClientIsDragging:FireServer(model) end)
+
+    elseif fireSignature == 2 then
+        pcall(function() ClientIsDragging:FireServer(model, goalCF) end)
+
+    elseif fireSignature == 3 then
+        pcall(function() ClientIsDragging:FireServer(model, goalCF, true) end)
+
+    elseif fireSignature == 4 then
+        local pos = goalCF and goalCF.Position or Vector3.zero
+        pcall(function() ClientIsDragging:FireServer(model, pos) end)
+
+    elseif fireSignature == 5 then
+        local hit = Mouse.Hit
+        pcall(function() ClientIsDragging:FireServer(model, hit) end)
+
+    else
+        pcall(function() ClientIsDragging:FireServer(model) end)
+    end
 end
 
+-- ─────────── HOLD SYSTEM ───────────
 local function startHold(model, part, goalCF)
     if not model or not model.Parent then return false end
     if not part or not part.Parent then return false end
@@ -190,6 +229,7 @@ local function quickGrab(model, timeout)
         pcall(function() startVal = lastInteracted.Value end)
     end
 
+    -- Grab with model-only signature (this is what normally triggers ownership)
     local deadline = tick() + timeout
     while tick() < deadline do
         if not model.Parent then return false end
@@ -215,7 +255,6 @@ local function movePlayerNear(root, targetPart)
     end
 end
 
--- Teleport-and-release (non-hold)
 local function teleportInBlueprint(bp, plankEntry, root)
     if not bp or not bp.Parent then return false, "no bp" end
     if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
@@ -235,7 +274,6 @@ local function teleportInBlueprint(bp, plankEntry, root)
     return true, "teleported"
 end
 
--- Grab and keep-holding
 local function holdInBlueprint(bp, plankEntry, root)
     if not bp or not bp.Parent then return false, "no bp" end
     if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
@@ -245,8 +283,9 @@ local function holdInBlueprint(bp, plankEntry, root)
     if heldPlanks[plankEntry.model] then
         local center = blueprintCenter(bp)
         if center then
-            heldPlanks[plankEntry.model].goalCF = CFrame.new(center)
-            fireDrag(plankEntry.model)
+            local cf = CFrame.new(center)
+            heldPlanks[plankEntry.model].goalCF = cf
+            fireDrag(plankEntry.model, cf)
         end
         return true, "re-targeted"
     end
@@ -264,7 +303,7 @@ local function holdInBlueprint(bp, plankEntry, root)
     end
 
     startHold(plankEntry.model, plankEntry.part, goalCF)
-    fireDrag(plankEntry.model)
+    fireDrag(plankEntry.model, goalCF)
     return true, "held"
 end
 
@@ -339,7 +378,6 @@ local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 
--- Floating toggle
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
 toggleBtn.Size = UDim2.fromOffset(40, 40)
@@ -357,7 +395,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 520
+local panelW, panelH = 320, 540
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -365,7 +403,7 @@ panel.Position = UDim2.new(0.5, -panelW / 2, 0.5, -panelH / 2)
 panel.BackgroundColor3 = BG_DARK
 panel.BorderSizePixel = 0
 panel.Active = true
-panel.Draggable = false   -- IMPORTANT: disabled so sliders don't drag the panel
+panel.Draggable = false
 panel.ClipsDescendants = true
 panel.Visible = true
 panel.Parent = gui
@@ -436,7 +474,6 @@ local padding = Instance.new("UIPadding", body)
 padding.PaddingTop = UDim.new(0, 6)
 padding.PaddingBottom = UDim.new(0, 6)
 
--- Resize handle
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(16, 16)
 resizeHandle.Position = UDim2.new(1, -20, 1, -20)
@@ -457,7 +494,6 @@ for i = 1, 3 do
     line.Parent = resizeHandle
 end
 
--- Side grip for dragging the panel
 local sideGrip = Instance.new("TextButton")
 sideGrip.Name = "SideGrip"
 sideGrip.Size = UDim2.new(0, 14, 1, -20)
@@ -483,7 +519,6 @@ for i = 1, 5 do
     Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
 end
 
--- Manual drag on the title bar and side grip
 local function makeDragHandle(frame)
     local dragging = false
     local dragStart, startPos
@@ -806,7 +841,6 @@ local function makeSlider(text, min, max, default, onChange, order)
         if not ok then warn("[BPFiller] slider error: " .. tostring(err)) end
     end
 
-    -- Track click+drag starts on the row itself (the track is too thin)
     frame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
@@ -978,8 +1012,6 @@ UIS.InputBegan:Connect(function(input, gp)
 end)
 
 -- ─────────── HOLD TICKER ───────────
--- Fires ClientIsDragging to keep ownership alive, and re-applies CFrame
--- every frame so the plank visually stays inside the blueprint.
 task.spawn(function()
     while gui and gui.Parent do
         local now = tick()
@@ -987,22 +1019,20 @@ task.spawn(function()
             if not model.Parent or not data.part.Parent then
                 heldPlanks[model] = nil
             else
-                -- Re-apply CFrame every frame
                 if data.part.Parent then
                     data.part.CFrame = data.goalCF
                 end
 
-                -- Fire the drag remote to keep ownership alive
                 if not fireOnceOnly then
                     if fireEveryFrame then
                         data.lastFire = now
-                        fireDrag(model)
+                        fireDrag(model, data.goalCF)
                         if data.part.Parent then
                             data.part.CFrame = data.goalCF
                         end
                     elseif now - data.lastFire >= HOLD_FIRE_INTERVAL then
                         data.lastFire = now
-                        fireDrag(model)
+                        fireDrag(model, data.goalCF)
                         if data.part.Parent then
                             data.part.CFrame = data.goalCF
                         end
@@ -1022,6 +1052,7 @@ local woodTypeDropdown = nil
 local playerDropdown = nil
 local woodOwnerDropdown = nil
 local holdCountPara = nil
+local fireSigDropdown = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -1066,7 +1097,16 @@ local function getWoodTypeOptions(discovered)
     return opts
 end
 
--- Core fill dispatcher: either hold or teleport
+local function getFireSigOptions()
+    return {
+        "1) Model only",
+        "2) Model + CFrame",
+        "3) Model + CFrame + true",
+        "4) Model + Vector3",
+        "5) Model + Mouse.Hit",
+    }
+end
+
 local function doFill(bp, plankEntry, root, useHold)
     if useHold then
         return holdInBlueprint(bp, plankEntry, root)
@@ -1394,6 +1434,14 @@ makeButton("Release All",
 
 makeSection("HOLD TUNING", nextOrder())
 
+fireSigDropdown = makeDropdown("Fire Signature", getFireSigOptions(), "2) Model + CFrame", function(opt)
+    local n = tonumber(string.match(opt, "^(%d+)"))
+    if n then
+        fireSignature = n
+        setStatus("Fire signature: " .. opt)
+    end
+end, nextOrder())
+
 makeSlider("Fire Interval (s)", 0.02, 0.5, HOLD_FIRE_INTERVAL, function(v)
     HOLD_FIRE_INTERVAL = v
     setStatus(string.format("Fire rate: %.3fs (%.0f/sec)", v, 1/v))
@@ -1530,4 +1578,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] v" .. VERSION .. " loaded. Drag the side grip or title bar to move.")
+print("[BPFiller] v" .. VERSION .. " loaded. Fire signature default: Model + CFrame.")
