@@ -1,10 +1,10 @@
--- v0.5
+-- v0.6
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.5"
+local VERSION = "0.6"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -70,40 +70,99 @@ end
 -- ─────────── DRAG SNIFFER ───────────
 _G._BPFDragSniffing = false
 _G._BPFSnifferInstalled = false
+_G._BPFOriginalNamecall = nil
+
+local function logArgs(tag, args)
+    print(string.format("[SNIFF] %s  argCount=%d", tag, #args))
+    for i = 1, #args do
+        local v = args[i]
+        print(string.format("   [%d] type=%s  value=%s", i, typeof(v), tostring(v)))
+        if typeof(v) == "CFrame" then
+            print("       pos=" .. tostring(v.Position))
+        elseif typeof(v) == "Vector3" then
+            print("       xyz=" .. tostring(v))
+        elseif typeof(v) == "Instance" then
+            print("       name=" .. v.Name .. "  class=" .. v.ClassName)
+        end
+    end
+end
 
 local function installDragSniffer()
     if not ClientIsDragging then return false, "remote not found" end
     if _G._BPFSnifferInstalled then return true, "already installed" end
 
-    local ok, err = pcall(function()
-        local originalFire = ClientIsDragging.FireServer
-
-        ClientIsDragging.FireServer = function(self, ...)
-            if _G._BPFDragSniffing then
-                local args = { ... }
-                print(string.format("[SNIFF] ClientIsDragging:FireServer  argCount=%d", #args))
-                for i = 1, #args do
-                    local v = args[i]
-                    print(string.format("   [%d] type=%s  value=%s", i, typeof(v), tostring(v)))
-                    if typeof(v) == "CFrame" then
-                        print("       pos=" .. tostring(v.Position))
-                    elseif typeof(v) == "Vector3" then
-                        print("       xyz=" .. tostring(v))
-                    elseif typeof(v) == "Instance" then
-                        print("       name=" .. v.Name .. "  class=" .. v.ClassName)
-                    end
+    -- Method 1: hookmetamethod on game's __namecall (most reliable)
+    if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
+        local ok, err = pcall(function()
+            local oldNamecall
+            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                local method = getnamecallmethod()
+                if _G._BPFDragSniffing and self == ClientIsDragging then
+                    logArgs("ClientIsDragging:" .. tostring(method), { ... })
                 end
-            end
-            return originalFire(self, ...)
+                return oldNamecall(self, ...)
+            end)
+            _G._BPFOriginalNamecall = oldNamecall
+        end)
+        if ok then
+            _G._BPFSnifferInstalled = true
+            return true, "hookmetamethod (__namecall)"
+        else
+            print("[Sniffer] hookmetamethod failed: " .. tostring(err))
         end
-    end)
-
-    if not ok then
-        return false, "hook failed: " .. tostring(err)
+    else
+        print("[Sniffer] hookmetamethod not available")
     end
 
-    _G._BPFSnifferInstalled = true
-    return true, "installed"
+    -- Method 2: getrawmetatable + setreadonly
+    if type(getrawmetatable) == "function" then
+        local ok, err = pcall(function()
+            local mt = getrawmetatable(game)
+            local oldNamecall = mt.__namecall
+            if setreadonly then setreadonly(mt, false) end
+            mt.__namecall = function(self, ...)
+                local method = getnamecallmethod and getnamecallmethod() or ""
+                if _G._BPFDragSniffing and self == ClientIsDragging then
+                    logArgs("ClientIsDragging:" .. tostring(method), { ... })
+                end
+                return oldNamecall(self, ...)
+            end
+            if setreadonly then setreadonly(mt, true) end
+            _G._BPFOriginalNamecall = oldNamecall
+        end)
+        if ok then
+            _G._BPFSnifferInstalled = true
+            return true, "getrawmetatable (__namecall)"
+        else
+            print("[Sniffer] getrawmetatable failed: " .. tostring(err))
+        end
+    else
+        print("[Sniffer] getrawmetatable not available")
+    end
+
+    return false, "no hook method available in this executor"
+end
+
+local function reportCapabilities()
+    local lines = {}
+    local function chk(name)
+        local t = type(_G[name])
+        if t == "function" then
+            table.insert(lines, name .. " = YES")
+        else
+            table.insert(lines, name .. " = no")
+        end
+    end
+    chk("hookmetamethod")
+    chk("hookfunction")
+    chk("getrawmetatable")
+    chk("setreadonly")
+    chk("getnamecallmethod")
+    chk("newcclosure")
+    chk("getgenv")
+    print("=== Executor Capabilities ===")
+    for _, l in ipairs(lines) do print("  " .. l) end
+    print("=============================")
 end
 
 -- ─────────── STATE ───────────
@@ -1587,6 +1646,13 @@ makeButton("Reinstall Sniffer",
                 (ok and "Installed: " or "FAILED: ") .. tostring(msg))
         end)
         setStatus(ok and "Sniffer reinstalled" or ("Sniffer failed: " .. tostring(msg)))
+    end, nextOrder())
+
+makeButton("Report Executor Capabilities",
+    "Print which hook methods this executor supports",
+    function()
+        reportCapabilities()
+        setStatus("Capabilities printed to console")
     end, nextOrder())
 
 makeButton("Print All Interaction Remotes",
