@@ -11,58 +11,14 @@ local RS2 = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
 
--- ─────────── REMOTE DISCOVERY ───────────
+-- Only remote we need. Spamming it = keeping the item held.
 local Interaction = RS2:WaitForChild("Interaction", 10)
 local ClientIsDragging = nil
-local ClientIsCarrying = nil
-
 if Interaction then
-    -- Dragging remote (already known)
     ClientIsDragging = Interaction:FindFirstChild("ClientIsDragging")
     if not ClientIsDragging then
         ClientIsDragging = Interaction:WaitForChild("ClientIsDragging", 10)
     end
-
-    -- Try common carry remote names first
-    local candidates = {
-        "ClientIsCarrying", "ClientCarrying", "ClientIsCarryingItem",
-        "ClientIsCarryingWood", "ClientIsHolding", "ClientHold",
-        "ClientIsMoving", "Carrying", "ClientCarry", "ClientIsPicking",
-        "ClientPickedUp", "ClientPickUp"
-    }
-    for _, name in ipairs(candidates) do
-        local r = Interaction:FindFirstChild(name)
-        if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
-            ClientIsCarrying = r
-            break
-        end
-    end
-
-    -- Fuzzy fallback: any remote with "carr" or "hold" or "pick" in name
-    if not ClientIsCarrying then
-        for _, child in ipairs(Interaction:GetChildren()) do
-            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
-                local lname = child.Name:lower()
-                if lname:find("carr") or lname:find("hold") or lname:find("pick") then
-                    ClientIsCarrying = child
-                    break
-                end
-            end
-        end
-    end
-end
-
-local function listInteractionRemotes()
-    local names = {}
-    if Interaction then
-        for _, child in ipairs(Interaction:GetChildren()) do
-            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
-                table.insert(names, child.Name)
-            end
-        end
-    end
-    table.sort(names)
-    return names
 end
 
 -- ─────────── STATE ───────────
@@ -74,8 +30,9 @@ local selectedPlayer    = plr
 local selectedWoodOwner = plr
 
 -- Hold state: [model] = { part, goalCF, lastFire }
-local heldPlanks         = {}
-local HOLD_FIRE_INTERVAL = 0.05   -- "spam" rate per plank
+local heldPlanks        = {}
+local HOLD_FIRE_INTERVAL = 0.03    -- seconds between spam fires per plank
+local spamEveryFrame     = false   -- if true, fire on every render step
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -175,14 +132,24 @@ local function blueprintCenter(model)
     return nil
 end
 
--- ─────────── HOLD MANAGEMENT ───────────
+-- ─────────── HOLD SYSTEM ───────────
+-- The way LT2 works: ClientIsDragging:FireServer(model) tells the server
+-- "I'm dragging this item". The server times out that state quickly unless
+-- it keeps receiving fires. So to "hold" wood inside a blueprint, we
+-- continuously spam this remote while forcing the part's CFrame.
+
+local function fireDrag(model)
+    if not ClientIsDragging then return end
+    pcall(function() ClientIsDragging:FireServer(model) end)
+end
+
 local function startHold(model, part, goalCF)
     if not model or not model.Parent then return false end
     if not part or not part.Parent then return false end
     heldPlanks[model] = {
         part = part,
         goalCF = goalCF,
-        lastFire = 0,       -- fire immediately
+        lastFire = 0,
     }
     return true
 end
@@ -201,44 +168,30 @@ local function holdCount()
     return n
 end
 
--- Fires the carry + drag remotes for one held model
-local function fireHoldRemotes(model, goalCF)
-    if ClientIsDragging then
-        pcall(function() ClientIsDragging:FireServer(model) end)
-    end
-    if ClientIsCarrying then
-        -- Try several signatures — most LT2-style remotes accept model only,
-        -- some accept (model, cframe). Fire whichever doesn't error.
-        local ok = pcall(function() ClientIsCarrying:FireServer(model) end)
-        if not ok then
-            pcall(function() ClientIsCarrying:FireServer(model, goalCF) end)
-        end
-    end
-end
-
--- Global hold ticker (spams remotes + reapplies CFrame)
+-- The ticker: constantly re-fire ClientIsDragging + re-apply CFrame
 task.spawn(function()
     while gui == nil or (gui and gui.Parent) do
-        task.wait(0.03)
-        if gui and not gui.Parent then break end
         local now = tick()
+        local fireAll = spamEveryFrame
         for model, data in pairs(heldPlanks) do
             if not model.Parent or not data.part.Parent then
                 heldPlanks[model] = nil
             else
-                if now - data.lastFire >= HOLD_FIRE_INTERVAL then
+                if fireAll or (now - data.lastFire >= HOLD_FIRE_INTERVAL) then
                     data.lastFire = now
-                    fireHoldRemotes(model, data.goalCF)
+                    fireDrag(model)
                 end
                 if data.part.Parent then
                     data.part.CFrame = data.goalCF
                 end
             end
         end
+        RunService.RenderStepped:Wait()
+        if gui and not gui.Parent then break end
     end
 end)
 
--- ─────────── GRAB PRIMITIVE ───────────
+-- ─────────── GRAB / HOLD PRIMITIVE ───────────
 local function quickGrab(model, timeout)
     timeout = timeout or 0.8
     if not model or not model.Parent then return false end
@@ -293,7 +246,7 @@ local function holdInBlueprint(bp, plankEntry, root)
         local center = blueprintCenter(bp)
         if center then
             heldPlanks[plankEntry.model].goalCF = CFrame.new(center)
-            fireHoldRemotes(plankEntry.model, heldPlanks[plankEntry.model].goalCF)
+            fireDrag(plankEntry.model)
         end
         return true, "re-targeted"
     end
@@ -312,8 +265,7 @@ local function holdInBlueprint(bp, plankEntry, root)
     end
 
     startHold(plankEntry.model, plankEntry.part, goalCF)
-    -- Fire immediately so the server sees the carry state right away
-    fireHoldRemotes(plankEntry.model, goalCF)
+    fireDrag(plankEntry.model)
     return true, "held"
 end
 
@@ -387,8 +339,6 @@ local BG_DARK = Color3.fromRGB(15, 15, 20)
 local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
-local GOOD = Color3.fromRGB(90, 200, 120)
-local BAD = Color3.fromRGB(220, 90, 90)
 
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
@@ -744,7 +694,7 @@ local function makeSlider(text, min, max, default, onChange, order)
     valLbl.Size = UDim2.fromOffset(50, 14)
     valLbl.Position = UDim2.new(1, -56, 0, 4)
     valLbl.BackgroundTransparency = 1
-    valLbl.Text = tostring(default)
+    valLbl.Text = string.format("%.3f", default)
     valLbl.TextColor3 = ACCENT
     valLbl.Font = Enum.Font.GothamBold
     valLbl.TextSize = 11
@@ -785,7 +735,7 @@ local function makeSlider(text, min, max, default, onChange, order)
         local val = min + (max - min) * frac
         fill.Size = UDim2.new(frac, 0, 1, 0)
         knob.Position = UDim2.new(frac, 0, 0.5, 0)
-        valLbl.Text = string.format("%.3g", val)
+        valLbl.Text = string.format("%.3f", val)
         local ok, err = pcall(onChange, val)
         if not ok then warn("[BPFiller] slider error: " .. tostring(err)) end
     end
@@ -967,7 +917,6 @@ local woodTypeDropdown = nil
 local playerDropdown = nil
 local woodOwnerDropdown = nil
 local holdCountPara = nil
-local remoteInfoPara = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -978,15 +927,6 @@ local function setHoldCount()
     if holdCountPara then
         pcall(function() holdCountPara:setDesc(holdCountPara, "Currently holding: " .. holdCount() .. " planks") end)
     end
-end
-
-local function setRemoteInfo()
-    if not remoteInfoPara then return end
-    local dragName = ClientIsDragging and ClientIsDragging.Name or "MISSING"
-    local carryName = ClientIsCarrying and ClientIsCarrying.Name or "not found"
-    pcall(function()
-        remoteInfoPara:setDesc(remoteInfoPara, "Drag: " .. dragName .. "  |  Carry: " .. carryName)
-    end)
 end
 
 local function getPlayerOptions()
@@ -1030,7 +970,7 @@ local function fillAllBlueprints()
 
     local pl = collectMatchingPlanks()
     if #pl == 0 then
-        setStatus("No matching planks (" .. selectedWoodOwner.Name .. "'s wood)")
+        setStatus("No matching planks")
         return
     end
 
@@ -1042,7 +982,7 @@ local function fillAllBlueprints()
 
     autoFillRunning = true
     autoFillCancel = false
-    setStatus(string.format("Hold-filling %d bps with %d planks", #bps, #pl))
+    setStatus(string.format("Holding %d planks in %d blueprints", #pl, #bps))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -1062,7 +1002,7 @@ local function fillAllBlueprints()
                 end
             end
             if not plankEntry then
-                setStatus("Ran out of matching planks")
+                setStatus("Ran out of planks")
                 break
             end
 
@@ -1264,12 +1204,12 @@ makeInput("Max Y Size", tostring(filterMaxY), function(t)
     local n = tonumber(t); if n then filterMaxY = n end
 end, nextOrder())
 
-makeSlider("Hold Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
+makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
 
 makeSection("HOLD MODE", nextOrder())
 
 clickToggleHandle = makeToggle("Click to Fill (Hold)",
-    "Click a blueprint to hold a matching plank inside it",
+    "Click a blueprint to grab and hold a matching plank inside it",
     false,
     function(state)
         if state then startClickMode() else stopClickMode() end
@@ -1277,11 +1217,11 @@ clickToggleHandle = makeToggle("Click to Fill (Hold)",
     end, nextOrder())
 
 makeButton("Auto Fill All (Hold)",
-    "Hold a matching plank in every blueprint owned by the target player",
+    "Grab and hold a matching plank in every target blueprint",
     function() fillAllBlueprints() end, nextOrder())
 
 makeToggle("Loop Mode (Hold)",
-    "Continuously scan and hold planks in blueprints as new planks appear",
+    "Continuously scan and hold planks as new planks appear",
     false,
     function(state)
         loopMode = state
@@ -1291,7 +1231,7 @@ makeToggle("Loop Mode (Hold)",
 holdCountPara = makeParagraph("Held Planks", "Currently holding: 0 planks", nextOrder())
 
 makeButton("Release All",
-    "Drop every plank you are currently holding",
+    "Stop holding every plank (let go of drag state)",
     function()
         local count = holdCount()
         stopAllHolds()
@@ -1299,42 +1239,19 @@ makeButton("Release All",
         setStatus("Released " .. count .. " plank(s)")
     end, nextOrder())
 
-makeSection("DEBUG / REMOTES", nextOrder())
+makeSection("HOLD TUNING", nextOrder())
 
-remoteInfoPara = makeParagraph("Active Remotes",
-    "Drag: " .. (ClientIsDragging and ClientIsDragging.Name or "MISSING")
-    .. "  |  Carry: " .. (ClientIsCarrying and ClientIsCarrying.Name or "not found"),
-    nextOrder())
+makeSlider("Spam Rate (s)", 0.016, 0.2, HOLD_FIRE_INTERVAL, function(v)
+    HOLD_FIRE_INTERVAL = v
+    setStatus(string.format("Spam rate: %.3fs (%.0f/sec)", v, 1/v))
+end, nextOrder())
 
-makeButton("Print All Interaction Remotes",
-    "Prints every RemoteEvent/RemoteFunction inside ReplicatedStorage.Interaction to output",
-    function()
-        local names = listInteractionRemotes()
-        print("=== Interaction remotes ===")
-        for _, n in ipairs(names) do print("  " .. n) end
-        print("============================")
-        setStatus("Printed " .. #names .. " remotes to output")
-    end, nextOrder())
-
-makeButton("Refresh Remote Detection",
-    "Re-scans the Interaction folder for the carry remote",
-    function()
-        if not Interaction then return end
-        local candidates = {
-            "ClientIsCarrying", "ClientCarrying", "ClientIsCarryingItem",
-            "ClientIsCarryingWood", "ClientIsHolding", "ClientHold",
-            "ClientIsMoving", "Carrying", "ClientCarry", "ClientIsPicking",
-            "ClientPickedUp", "ClientPickUp"
-        }
-        for _, name in ipairs(candidates) do
-            local r = Interaction:FindFirstChild(name)
-            if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
-                ClientIsCarrying = r
-                break
-            end
-        end
-        setRemoteInfo()
-        setStatus("Carry remote: " .. (ClientIsCarrying and ClientIsCarrying.Name or "not found"))
+makeToggle("Spam Every Frame",
+    "Max hold strength — fire ClientIsDragging every render step (~60/sec per plank)",
+    false,
+    function(state)
+        spamEveryFrame = state
+        setStatus(state and "Frame-spam ON (aggressive)" or "Frame-spam OFF")
     end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
@@ -1348,7 +1265,7 @@ end, nextOrder())
 
 makeSection("STATUS", nextOrder())
 
-statusPara = makeParagraph("Status", "Ready - click a blueprint or use Auto Fill", nextOrder())
+statusPara = makeParagraph("Status", "Ready", nextOrder())
 
 -- ─────────── MIN / CLOSE / RESIZE ───────────
 local minimized = false
@@ -1454,4 +1371,3 @@ end)
 
 print("[BPFiller] Loaded.")
 print("[BPFiller] Drag remote: " .. (ClientIsDragging and ClientIsDragging.Name or "MISSING"))
-print("[BPFiller] Carry remote: " .. (ClientIsCarrying and ClientIsCarrying.Name or "not found — use 'Print All Interaction Remotes' to find it"))
