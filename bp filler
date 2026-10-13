@@ -11,8 +11,61 @@ local RS2 = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
 
-local ClientIsDragging = RS2:WaitForChild("Interaction"):WaitForChild("ClientIsDragging", 10)
+-- ─────────── REMOTE DISCOVERY ───────────
+local Interaction = RS2:WaitForChild("Interaction", 10)
+local ClientIsDragging = nil
+local ClientIsCarrying = nil
 
+if Interaction then
+    -- Dragging remote (already known)
+    ClientIsDragging = Interaction:FindFirstChild("ClientIsDragging")
+    if not ClientIsDragging then
+        ClientIsDragging = Interaction:WaitForChild("ClientIsDragging", 10)
+    end
+
+    -- Try common carry remote names first
+    local candidates = {
+        "ClientIsCarrying", "ClientCarrying", "ClientIsCarryingItem",
+        "ClientIsCarryingWood", "ClientIsHolding", "ClientHold",
+        "ClientIsMoving", "Carrying", "ClientCarry", "ClientIsPicking",
+        "ClientPickedUp", "ClientPickUp"
+    }
+    for _, name in ipairs(candidates) do
+        local r = Interaction:FindFirstChild(name)
+        if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
+            ClientIsCarrying = r
+            break
+        end
+    end
+
+    -- Fuzzy fallback: any remote with "carr" or "hold" or "pick" in name
+    if not ClientIsCarrying then
+        for _, child in ipairs(Interaction:GetChildren()) do
+            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                local lname = child.Name:lower()
+                if lname:find("carr") or lname:find("hold") or lname:find("pick") then
+                    ClientIsCarrying = child
+                    break
+                end
+            end
+        end
+    end
+end
+
+local function listInteractionRemotes()
+    local names = {}
+    if Interaction then
+        for _, child in ipairs(Interaction:GetChildren()) do
+            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                table.insert(names, child.Name)
+            end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+-- ─────────── STATE ───────────
 local fillDelay         = 0.15
 local filterMinY        = 0
 local filterMaxY        = 1000
@@ -20,9 +73,9 @@ local selectedTreeClass = nil
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
 
--- Hold tracking: [model] = { part, goalCF, lastFire }
-local heldPlanks        = {}
-local HOLD_FIRE_INTERVAL = 0.25
+-- Hold state: [model] = { part, goalCF, lastFire }
+local heldPlanks         = {}
+local HOLD_FIRE_INTERVAL = 0.05   -- "spam" rate per plank
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -40,6 +93,7 @@ local clickConn         = nil
 local SCAN_INTERVAL     = 2
 local lastScanAccum     = 0
 
+-- ─────────── HELPERS ───────────
 local function getPlayerModels()
     return workspace:FindFirstChild("PlayerModels")
 end
@@ -122,22 +176,19 @@ local function blueprintCenter(model)
 end
 
 -- ─────────── HOLD MANAGEMENT ───────────
-
 local function startHold(model, part, goalCF)
     if not model or not model.Parent then return false end
     if not part or not part.Parent then return false end
     heldPlanks[model] = {
         part = part,
         goalCF = goalCF,
-        lastFire = tick(),
+        lastFire = 0,       -- fire immediately
     }
     return true
 end
 
 local function stopHold(model)
-    if heldPlanks[model] then
-        heldPlanks[model] = nil
-    end
+    heldPlanks[model] = nil
 end
 
 local function stopAllHolds()
@@ -150,10 +201,25 @@ local function holdCount()
     return n
 end
 
--- Global hold ticker: keeps ClientIsDragging alive and reapplies CFrame
+-- Fires the carry + drag remotes for one held model
+local function fireHoldRemotes(model, goalCF)
+    if ClientIsDragging then
+        pcall(function() ClientIsDragging:FireServer(model) end)
+    end
+    if ClientIsCarrying then
+        -- Try several signatures — most LT2-style remotes accept model only,
+        -- some accept (model, cframe). Fire whichever doesn't error.
+        local ok = pcall(function() ClientIsCarrying:FireServer(model) end)
+        if not ok then
+            pcall(function() ClientIsCarrying:FireServer(model, goalCF) end)
+        end
+    end
+end
+
+-- Global hold ticker (spams remotes + reapplies CFrame)
 task.spawn(function()
     while gui == nil or (gui and gui.Parent) do
-        task.wait(0.1)
+        task.wait(0.03)
         if gui and not gui.Parent then break end
         local now = tick()
         for model, data in pairs(heldPlanks) do
@@ -162,7 +228,7 @@ task.spawn(function()
             else
                 if now - data.lastFire >= HOLD_FIRE_INTERVAL then
                     data.lastFire = now
-                    pcall(function() ClientIsDragging:FireServer(model) end)
+                    fireHoldRemotes(model, data.goalCF)
                 end
                 if data.part.Parent then
                     data.part.CFrame = data.goalCF
@@ -172,8 +238,7 @@ task.spawn(function()
     end
 end)
 
--- ─────────── GRAB / HOLD PRIMITIVE ───────────
-
+-- ─────────── GRAB PRIMITIVE ───────────
 local function quickGrab(model, timeout)
     timeout = timeout or 0.8
     if not model or not model.Parent then return false end
@@ -218,20 +283,19 @@ local function movePlayerNear(root, targetPart)
     end
 end
 
--- Holds a plank inside a blueprint (Kron-style)
 local function holdInBlueprint(bp, plankEntry, root)
     if not bp or not bp.Parent then return false, "no bp" end
     if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
         return false, "no plank"
     end
 
-    -- Already held? Just re-target it
     if heldPlanks[plankEntry.model] then
         local center = blueprintCenter(bp)
         if center then
             heldPlanks[plankEntry.model].goalCF = CFrame.new(center)
+            fireHoldRemotes(plankEntry.model, heldPlanks[plankEntry.model].goalCF)
         end
-        return true, "already held"
+        return true, "re-targeted"
     end
 
     local center = blueprintCenter(bp)
@@ -248,11 +312,12 @@ local function holdInBlueprint(bp, plankEntry, root)
     end
 
     startHold(plankEntry.model, plankEntry.part, goalCF)
+    -- Fire immediately so the server sees the carry state right away
+    fireHoldRemotes(plankEntry.model, goalCF)
     return true, "held"
 end
 
 -- ─────────── SCANNING ───────────
-
 local function scanPlanks()
     local pm = getPlayerModels()
     local byTree = {}
@@ -322,6 +387,8 @@ local BG_DARK = Color3.fromRGB(15, 15, 20)
 local BG_ROW = Color3.fromRGB(25, 25, 32)
 local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
+local GOOD = Color3.fromRGB(90, 200, 120)
+local BAD = Color3.fromRGB(220, 90, 90)
 
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
@@ -340,7 +407,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 460
+local panelW, panelH = 320, 500
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -750,9 +817,7 @@ local openDropdowns = {}
 
 local function closeAllDropdowns(except)
     for _, dd in ipairs(openDropdowns) do
-        if dd ~= except then
-            dd:close()
-        end
+        if dd ~= except then dd:close() end
     end
 end
 
@@ -816,16 +881,12 @@ local function makeDropdown(text, values, default, onChange, order)
     local listFrame = nil
 
     local function closeList()
-        if listFrame then
-            listFrame:Destroy()
-            listFrame = nil
-        end
+        if listFrame then listFrame:Destroy(); listFrame = nil end
         open = false
     end
 
     local function openList()
         closeAllDropdowns()
-
         listFrame = Instance.new("ScrollingFrame")
         listFrame.Name = "DropdownList"
         listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
@@ -882,10 +943,7 @@ local function makeDropdown(text, values, default, onChange, order)
         Set = function(_, v) selLbl.Text = tostring(v) end,
         SetValues = function(_, newValues)
             currentValues = newValues
-            if open then
-                closeList()
-                openList()
-            end
+            if open then closeList(); openList() end
         end,
         close = closeList,
         frame = frame,
@@ -898,10 +956,7 @@ UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.UserInputType ~= Enum.UserInputType.MouseButton1
     and input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-    for _, dd in ipairs(openDropdowns) do
-        dd:close()
-    end
+    for _, dd in ipairs(openDropdowns) do dd:close() end
 end)
 
 -- ─────────── LOGIC ───────────
@@ -912,6 +967,7 @@ local woodTypeDropdown = nil
 local playerDropdown = nil
 local woodOwnerDropdown = nil
 local holdCountPara = nil
+local remoteInfoPara = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -924,12 +980,19 @@ local function setHoldCount()
     end
 end
 
+local function setRemoteInfo()
+    if not remoteInfoPara then return end
+    local dragName = ClientIsDragging and ClientIsDragging.Name or "MISSING"
+    local carryName = ClientIsCarrying and ClientIsCarrying.Name or "not found"
+    pcall(function()
+        remoteInfoPara:setDesc(remoteInfoPara, "Drag: " .. dragName .. "  |  Carry: " .. carryName)
+    end)
+end
+
 local function getPlayerOptions()
     local opts = { "(Me)" }
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= plr then
-            table.insert(opts, p.Name)
-        end
+        if p ~= plr then table.insert(opts, p.Name) end
     end
     table.sort(opts, function(a, b)
         if a == "(Me)" then return true end
@@ -958,7 +1021,6 @@ local function getWoodTypeOptions(discovered)
     return opts
 end
 
--- Fill = hold in blueprint (Kron-style)
 local function fillAllBlueprints()
     if autoFillRunning then
         autoFillCancel = true
@@ -974,7 +1036,7 @@ local function fillAllBlueprints()
 
     local bps = collectBlueprints()
     if #bps == 0 then
-        setStatus("No blueprints found for " .. selectedPlayer.Name)
+        setStatus("No blueprints for " .. selectedPlayer.Name)
         return
     end
 
@@ -1005,7 +1067,6 @@ local function fillAllBlueprints()
             end
 
             setStatus(string.format("Holding %d/%d (%s)", i, #bps, bp.Name))
-
             local ok = holdInBlueprint(bp, plankEntry, root)
             if ok then filled += 1 else failed += 1 end
             setHoldCount()
@@ -1047,9 +1108,7 @@ local function loopTick()
             end
             if not plankEntry then break end
             setStatus(string.format("Loop: holding %s", bp.Name))
-            if holdInBlueprint(bp, plankEntry, root) then
-                filled += 1
-            end
+            if holdInBlueprint(bp, plankEntry, root) then filled += 1 end
             setHoldCount()
             task.wait(fillDelay)
         end
@@ -1063,9 +1122,7 @@ local clickToggleHandle = nil
 local function stopClickMode()
     clickMode = false
     if clickConn then clickConn:Disconnect(); clickConn = nil end
-    if clickToggleHandle then
-        pcall(function() clickToggleHandle:Set(false) end)
-    end
+    if clickToggleHandle then pcall(function() clickToggleHandle:Set(false) end) end
 end
 
 local function startClickMode()
@@ -1095,11 +1152,8 @@ local function startClickMode()
         task.spawn(function()
             local ok = holdInBlueprint(node, entry, root)
             setHoldCount()
-            if ok then
-                setStatus("Held in " .. node.Name)
-            else
-                setStatus("Hold failed")
-            end
+            if ok then setStatus("Held in " .. node.Name)
+            else setStatus("Hold failed") end
         end)
     end)
 end
@@ -1111,9 +1165,7 @@ local pickBtnHandle = nil
 local function stopPickMode()
     pickMode = false
     if pickConn then pickConn:Disconnect(); pickConn = nil end
-    if pickBtnHandle then
-        pcall(function() pickBtnHandle.Text = "Pick Plank" end)
-    end
+    if pickBtnHandle then pcall(function() pickBtnHandle.Text = "Pick Plank" end) end
 end
 
 local function startPickMode()
@@ -1133,19 +1185,14 @@ local function startPickMode()
         while node and node.Parent ~= pm do node = node.Parent end
         if not node or not pm then stopPickMode(); return end
         if not isLoosePlank(node) then
-            setStatus("Not a matching plank")
-            stopPickMode(); return
+            setStatus("Not a matching plank"); stopPickMode(); return
         end
         local tc = plankTreeClass(node)
         if tc then
             selectedTreeClass = tc
             setStatus("Picked Wood Type=" .. tc)
-            if woodTypeDropdown then
-                pcall(function() woodTypeDropdown:Set(tc) end)
-            end
-            if treeLabelPara then
-                pcall(function() treeLabelPara:setDesc(treeLabelPara, tc) end)
-            end
+            if woodTypeDropdown then pcall(function() woodTypeDropdown:Set(tc) end) end
+            if treeLabelPara then pcall(function() treeLabelPara:setDesc(treeLabelPara, tc) end) end
         end
         stopPickMode()
     end)
@@ -1160,9 +1207,7 @@ local function updateInventory()
             local parts = {}
             for tc, data in pairs(byTree) do
                 local sizeParts = {}
-                for s, c in pairs(data.sizes) do
-                    table.insert(sizeParts, s .. "x" .. c)
-                end
+                for s, c in pairs(data.sizes) do table.insert(sizeParts, s .. "x" .. c) end
                 table.sort(sizeParts)
                 table.insert(parts, string.format("%s(%d): %s", tc, data.count, table.concat(sizeParts, ",")))
             end
@@ -1172,19 +1217,9 @@ local function updateInventory()
             end)
         end
     end
-
-    if woodTypeDropdown then
-        pcall(function() woodTypeDropdown:SetValues(getWoodTypeOptions(byTree)) end)
-    end
-
-    if playerDropdown then
-        pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
-    end
-
-    if woodOwnerDropdown then
-        pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
-    end
-
+    if woodTypeDropdown then pcall(function() woodTypeDropdown:SetValues(getWoodTypeOptions(byTree)) end) end
+    if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
+    if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
     setHoldCount()
 end
 
@@ -1195,35 +1230,21 @@ local function nextOrder() order += 1; return order end
 makeSection("TARGET", nextOrder())
 
 playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(), "(Me)", function(opt)
-    if opt == "(Me)" then
-        selectedPlayer = plr
-    else
-        local found = Players:FindFirstChild(opt)
-        selectedPlayer = found or plr
-    end
+    if opt == "(Me)" then selectedPlayer = plr
+    else selectedPlayer = Players:FindFirstChild(opt) or plr end
     setStatus("Blueprint owner: " .. selectedPlayer.Name)
 end, nextOrder())
 
 woodOwnerDropdown = makeDropdown("Use Wood From", getPlayerOptions(), "(Me)", function(opt)
-    if opt == "(Me)" then
-        selectedWoodOwner = plr
-    else
-        local found = Players:FindFirstChild(opt)
-        selectedWoodOwner = found or plr
-    end
+    if opt == "(Me)" then selectedWoodOwner = plr
+    else selectedWoodOwner = Players:FindFirstChild(opt) or plr end
     setStatus("Wood source: " .. selectedWoodOwner.Name)
     updateInventory()
 end, nextOrder())
 
 woodTypeDropdown = makeDropdown("Wood Type", getWoodTypeOptions(nil), "(All)", function(opt)
-    if opt == "(All)" then
-        selectedTreeClass = nil
-    else
-        selectedTreeClass = opt
-    end
-    if treeLabelPara then
-        pcall(function() treeLabelPara:setDesc(treeLabelPara, opt) end)
-    end
+    if opt == "(All)" then selectedTreeClass = nil else selectedTreeClass = opt end
+    if treeLabelPara then pcall(function() treeLabelPara:setDesc(treeLabelPara, opt) end) end
     setStatus("Wood type: " .. opt)
 end, nextOrder())
 
@@ -1231,8 +1252,7 @@ makeSection("PLANK SOURCE", nextOrder())
 
 pickBtnHandle = makeButton("Pick Plank",
     "Click a loose plank in the world to set the target wood type",
-    function() startPickMode() end,
-    nextOrder())
+    function() startPickMode() end, nextOrder())
 
 treeLabelPara = makeParagraph("Selected Wood Type", "None (all types)", nextOrder())
 
@@ -1244,9 +1264,7 @@ makeInput("Max Y Size", tostring(filterMaxY), function(t)
     local n = tonumber(t); if n then filterMaxY = n end
 end, nextOrder())
 
-makeSlider("Hold Delay (s)", 0.05, 0.5, fillDelay, function(v)
-    fillDelay = v
-end, nextOrder())
+makeSlider("Hold Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
 
 makeSection("HOLD MODE", nextOrder())
 
@@ -1256,13 +1274,11 @@ clickToggleHandle = makeToggle("Click to Fill (Hold)",
     function(state)
         if state then startClickMode() else stopClickMode() end
         setStatus(state and "Click-hold ON" or "Click-hold OFF")
-    end,
-    nextOrder())
+    end, nextOrder())
 
 makeButton("Auto Fill All (Hold)",
     "Hold a matching plank in every blueprint owned by the target player",
-    function() fillAllBlueprints() end,
-    nextOrder())
+    function() fillAllBlueprints() end, nextOrder())
 
 makeToggle("Loop Mode (Hold)",
     "Continuously scan and hold planks in blueprints as new planks appear",
@@ -1270,8 +1286,7 @@ makeToggle("Loop Mode (Hold)",
     function(state)
         loopMode = state
         setStatus(state and "Loop-hold ON" or "Loop-hold OFF")
-    end,
-    nextOrder())
+    end, nextOrder())
 
 holdCountPara = makeParagraph("Held Planks", "Currently holding: 0 planks", nextOrder())
 
@@ -1282,8 +1297,45 @@ makeButton("Release All",
         stopAllHolds()
         setHoldCount()
         setStatus("Released " .. count .. " plank(s)")
-    end,
+    end, nextOrder())
+
+makeSection("DEBUG / REMOTES", nextOrder())
+
+remoteInfoPara = makeParagraph("Active Remotes",
+    "Drag: " .. (ClientIsDragging and ClientIsDragging.Name or "MISSING")
+    .. "  |  Carry: " .. (ClientIsCarrying and ClientIsCarrying.Name or "not found"),
     nextOrder())
+
+makeButton("Print All Interaction Remotes",
+    "Prints every RemoteEvent/RemoteFunction inside ReplicatedStorage.Interaction to output",
+    function()
+        local names = listInteractionRemotes()
+        print("=== Interaction remotes ===")
+        for _, n in ipairs(names) do print("  " .. n) end
+        print("============================")
+        setStatus("Printed " .. #names .. " remotes to output")
+    end, nextOrder())
+
+makeButton("Refresh Remote Detection",
+    "Re-scans the Interaction folder for the carry remote",
+    function()
+        if not Interaction then return end
+        local candidates = {
+            "ClientIsCarrying", "ClientCarrying", "ClientIsCarryingItem",
+            "ClientIsCarryingWood", "ClientIsHolding", "ClientHold",
+            "ClientIsMoving", "Carrying", "ClientCarry", "ClientIsPicking",
+            "ClientPickedUp", "ClientPickUp"
+        }
+        for _, name in ipairs(candidates) do
+            local r = Interaction:FindFirstChild(name)
+            if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
+                ClientIsCarrying = r
+                break
+            end
+        end
+        setRemoteInfo()
+        setStatus("Carry remote: " .. (ClientIsCarrying and ClientIsCarrying.Name or "not found"))
+    end, nextOrder())
 
 makeSection("PLANK INVENTORY", nextOrder())
 
@@ -1359,35 +1411,23 @@ UIS.InputEnded:Connect(function(input)
     end
 end)
 
--- ─────────── PLAYER LIST REFRESH ───────────
+-- ─────────── PLAYER REFRESH ───────────
 Players.PlayerAdded:Connect(function()
-    if playerDropdown then
-        pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
-    end
-    if woodOwnerDropdown then
-        pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
-    end
+    if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
+    if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
 end)
 
 Players.PlayerRemoving:Connect(function(p)
     if selectedPlayer == p then
         selectedPlayer = plr
-        if playerDropdown then
-            pcall(function() playerDropdown:Set("(Me)") end)
-        end
+        if playerDropdown then pcall(function() playerDropdown:Set("(Me)") end) end
     end
     if selectedWoodOwner == p then
         selectedWoodOwner = plr
-        if woodOwnerDropdown then
-            pcall(function() woodOwnerDropdown:Set("(Me)") end)
-        end
+        if woodOwnerDropdown then pcall(function() woodOwnerDropdown:Set("(Me)") end) end
     end
-    if playerDropdown then
-        pcall(function() playerDropdown:SetValues(getPlayerOptions()) end)
-    end
-    if woodOwnerDropdown then
-        pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
-    end
+    if playerDropdown then pcall(function() playerDropdown:SetValues(getPlayerOptions()) end) end
+    if woodOwnerDropdown then pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end) end
 end)
 
 -- ─────────── BACKGROUND ───────────
@@ -1402,9 +1442,7 @@ end)
 
 task.spawn(function()
     while gui.Parent do
-        if loopMode then
-            pcall(loopTick)
-        end
+        if loopMode then pcall(loopTick) end
         task.wait(1.5)
     end
 end)
@@ -1414,4 +1452,6 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] Loaded. Click a blueprint to hold-fill it, or use Auto Fill.")
+print("[BPFiller] Loaded.")
+print("[BPFiller] Drag remote: " .. (ClientIsDragging and ClientIsDragging.Name or "MISSING"))
+print("[BPFiller] Carry remote: " .. (ClientIsCarrying and ClientIsCarrying.Name or "not found — use 'Print All Interaction Remotes' to find it"))
