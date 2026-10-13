@@ -828,7 +828,7 @@ sidebarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 local sidebarPad = Instance.new("UIPadding", sidebar)
 sidebarPad.PaddingTop = UDim.new(0, 8)
 
--- Sidebar bottom-right corner fix (so it doesn't stick out past the panel)
+-- Sidebar bottom-right corner fix
 local sidebarFix = Instance.new("Frame")
 sidebarFix.Size = UDim2.new(0, SIDEBAR_W, 0, 10)
 sidebarFix.Position = UDim2.new(0, 0, 1, -10)
@@ -1914,26 +1914,13 @@ local function resetSettings()
     setStatus("Settings reset to defaults")
 end
 
--- ─────────── BUILD CONTENT ───────────
+-- ─────────── BUILD CONTENT (ordered to match tabs) ───────────
 local order = 0
 local function nextOrder() order += 1; return order end
 
--- Fill tab
-makeSection("FILL METHOD", nextOrder(), "fill")
-makeDropdown("Mode", fillMethodLabels,
-    fillMethod == "Working" and "Working (teleport)" or "Testing/WIP (hold)",
-    function(opt)
-        if opt == "Working (teleport)" then
-            fillMethod = "Working"
-            setStatus("Mode: Working (teleport)")
-        else
-            fillMethod = "Testing/WIP"
-            setStatus("Mode: Testing/WIP (hold)")
-        end
-    end, nextOrder())
-
--- Target tab
+-- ═══ TARGET TAB ═══
 makeSection("TARGET", nextOrder(), "target")
+
 playerDropdown = makeDropdown("Fill Blueprints Of", getPlayerOptions(),
     selectedPlayer.Name or "(Me)", function(opt)
         if opt == "(Me)" then selectedPlayer = plr
@@ -1972,8 +1959,9 @@ makeButton("Refresh Players",
         setStatus("Refreshed dropdowns")
     end, nextOrder())
 
--- Planks tab
+-- ═══ PLANKS TAB ═══
 makeSection("PLANK SOURCE", nextOrder(), "planks")
+
 pickBtnHandle = makeButton("Pick Plank",
     "Click a loose plank in the world to set the target wood type",
     function() startPickMode() end, nextOrder())
@@ -1991,8 +1979,23 @@ end, nextOrder())
 
 makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
 
--- Fill tab continues
+-- ═══ FILL TAB ═══
+makeSection("FILL METHOD", nextOrder(), "fill")
+
+makeDropdown("Mode", fillMethodLabels,
+    fillMethod == "Working" and "Working (teleport)" or "Testing/WIP (hold)",
+    function(opt)
+        if opt == "Working (teleport)" then
+            fillMethod = "Working"
+            setStatus("Mode: Working (teleport)")
+        else
+            fillMethod = "Testing/WIP"
+            setStatus("Mode: Testing/WIP (hold)")
+        end
+    end, nextOrder())
+
 makeSection("MODES", nextOrder())
+
 makeButton("Auto Fill All",
     "One-shot fill of every target blueprint using the current mode",
     function() fillAllBlueprints() end, nextOrder())
@@ -2066,7 +2069,7 @@ makeToggle("Fire Once Only",
         setStatus(state and "Fire-once mode ON" or "Fire-once mode OFF")
     end, nextOrder())
 
--- Nav tab
+-- ═══ NAV TAB ═══
 makeSection("NAVIGATION", nextOrder(), "nav")
 
 makeButton("Fly",
@@ -2104,7 +2107,7 @@ makeButton("Refresh Bases",
         setStatus("Base list refreshed")
     end, nextOrder())
 
--- Config tab
+-- ═══ CONFIG TAB ═══
 makeSection("CONFIG", nextOrder(), "config")
 
 makeButton("Save Settings",
@@ -2119,7 +2122,7 @@ makeButton("Reset to Defaults",
     "Wipe everything back to defaults",
     function() resetSettings() end, nextOrder())
 
--- Debug tab (owner only)
+-- ═══ DEBUG TAB (owner only) ═══
 if IS_OWNER then
     makeSection("DEBUG / SNIFFER (owner only)", nextOrder(), "debug")
 
@@ -2186,7 +2189,7 @@ if IS_OWNER then
     end, nextOrder())
 end
 
--- Log tab
+-- ═══ LOG TAB ═══
 makeSection("CONSOLE (LIVE OUTPUT)", nextOrder(), "log")
 
 local consoleHolder = Instance.new("Frame")
