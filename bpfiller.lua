@@ -1,10 +1,10 @@
--- v0.6
+-- v0.7
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
 
-local VERSION = "0.6"
+local VERSION = "0.7"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -91,7 +91,6 @@ local function installDragSniffer()
     if not ClientIsDragging then return false, "remote not found" end
     if _G._BPFSnifferInstalled then return true, "already installed" end
 
-    -- Method 1: hookmetamethod on game's __namecall (most reliable)
     if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
         local ok, err = pcall(function()
             local oldNamecall
@@ -114,7 +113,6 @@ local function installDragSniffer()
         print("[Sniffer] hookmetamethod not available")
     end
 
-    -- Method 2: getrawmetatable + setreadonly
     if type(getrawmetatable) == "function" then
         local ok, err = pcall(function()
             local mt = getrawmetatable(game)
@@ -177,10 +175,10 @@ local fillMethod        = "Working"
 local fillMethodLabels  = { "Working (teleport)", "Testing/WIP (hold)" }
 
 local heldPlanks         = {}
-local HOLD_FIRE_INTERVAL = 0.1
+local HOLD_FIRE_INTERVAL = 0.5
 local fireEveryFrame     = false
 local fireOnceOnly       = false
-local fireSignature      = 2
+local fireSignature      = 1
 
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
@@ -1584,7 +1582,7 @@ makeButton("Release All",
 
 makeSection("HOLD TUNING (WIP ONLY)", nextOrder())
 
-makeDropdown("Fire Signature", getFireSigOptions(), "2) Model + CFrame", function(opt)
+makeDropdown("Fire Signature", getFireSigOptions(), "1) Model only", function(opt)
     local n = tonumber(string.match(opt, "^(%d+)"))
     if n then
         fireSignature = n
@@ -1592,7 +1590,7 @@ makeDropdown("Fire Signature", getFireSigOptions(), "2) Model + CFrame", functio
     end
 end, nextOrder())
 
-makeSlider("Fire Interval (s)", 0.02, 0.5, HOLD_FIRE_INTERVAL, function(v)
+makeSlider("Fire Interval (s)", 0.1, 1.0, HOLD_FIRE_INTERVAL, function(v)
     HOLD_FIRE_INTERVAL = v
     setStatus(string.format("Fire rate: %.3fs", v))
 end, nextOrder())
