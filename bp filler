@@ -20,6 +20,10 @@ local selectedTreeClass = nil
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
 
+-- Hold tracking: [model] = { part, goalCF, lastFire }
+local heldPlanks        = {}
+local HOLD_FIRE_INTERVAL = 0.25
+
 local LT2_WOOD_PRESETS = {
     "Oak", "Elm", "Birch", "Cherry", "Fir", "Walnut", "Koa", "Pine",
     "Palm", "Bamboo", "Cactus", "Gold Wood", "Lava Wood", "Zombie Wood",
@@ -117,8 +121,61 @@ local function blueprintCenter(model)
     return nil
 end
 
-local function grabOwnership(model, timeout)
-    timeout = timeout or 1.0
+-- ─────────── HOLD MANAGEMENT ───────────
+
+local function startHold(model, part, goalCF)
+    if not model or not model.Parent then return false end
+    if not part or not part.Parent then return false end
+    heldPlanks[model] = {
+        part = part,
+        goalCF = goalCF,
+        lastFire = tick(),
+    }
+    return true
+end
+
+local function stopHold(model)
+    if heldPlanks[model] then
+        heldPlanks[model] = nil
+    end
+end
+
+local function stopAllHolds()
+    heldPlanks = {}
+end
+
+local function holdCount()
+    local n = 0
+    for _ in pairs(heldPlanks) do n += 1 end
+    return n
+end
+
+-- Global hold ticker: keeps ClientIsDragging alive and reapplies CFrame
+task.spawn(function()
+    while gui == nil or (gui and gui.Parent) do
+        task.wait(0.1)
+        if gui and not gui.Parent then break end
+        local now = tick()
+        for model, data in pairs(heldPlanks) do
+            if not model.Parent or not data.part.Parent then
+                heldPlanks[model] = nil
+            else
+                if now - data.lastFire >= HOLD_FIRE_INTERVAL then
+                    data.lastFire = now
+                    pcall(function() ClientIsDragging:FireServer(model) end)
+                end
+                if data.part.Parent then
+                    data.part.CFrame = data.goalCF
+                end
+            end
+        end
+    end
+end)
+
+-- ─────────── GRAB / HOLD PRIMITIVE ───────────
+
+local function quickGrab(model, timeout)
+    timeout = timeout or 0.8
     if not model or not model.Parent then return false end
     if not ClientIsDragging then return false end
 
@@ -152,28 +209,49 @@ local function grabOwnership(model, timeout)
     return lastInteracted == nil
 end
 
-local function teleportObjectTo(part, goalCF, root)
-    if not part or not part.Parent then return false end
-    local model = part:FindFirstAncestorOfClass("Model") or part.Parent
-
-    if root then
-        local flat = (root.Position - part.Position) * Vector3.new(1, 0, 1)
-        if flat.Magnitude > 10 then
-            root.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
-            task.wait(0.15)
-        end
+local function movePlayerNear(root, targetPart)
+    if not root or not targetPart then return end
+    local flat = (root.Position - targetPart.Position) * Vector3.new(1, 0, 1)
+    if flat.Magnitude > 10 then
+        root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
+        task.wait(0.15)
     end
-
-    task.wait(0.05)
-    local got = grabOwnership(model, 1.0)
-    task.wait(0.05)
-
-    if part and part.Parent then
-        part.CFrame = goalCF
-    end
-    task.wait(0.1)
-    return got
 end
+
+-- Holds a plank inside a blueprint (Kron-style)
+local function holdInBlueprint(bp, plankEntry, root)
+    if not bp or not bp.Parent then return false, "no bp" end
+    if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
+        return false, "no plank"
+    end
+
+    -- Already held? Just re-target it
+    if heldPlanks[plankEntry.model] then
+        local center = blueprintCenter(bp)
+        if center then
+            heldPlanks[plankEntry.model].goalCF = CFrame.new(center)
+        end
+        return true, "already held"
+    end
+
+    local center = blueprintCenter(bp)
+    if not center then return false, "no center" end
+    local goalCF = CFrame.new(center)
+
+    movePlayerNear(root, plankEntry.part)
+
+    local got = quickGrab(plankEntry.model, 0.8)
+    if not got then return false, "grab failed" end
+
+    if plankEntry.part and plankEntry.part.Parent then
+        plankEntry.part.CFrame = goalCF
+    end
+
+    startHold(plankEntry.model, plankEntry.part, goalCF)
+    return true, "held"
+end
+
+-- ─────────── SCANNING ───────────
 
 local function scanPlanks()
     local pm = getPlayerModels()
@@ -181,7 +259,7 @@ local function scanPlanks()
     local total = 0
     if not pm then return byTree, total end
     for _, m in ipairs(pm:GetChildren()) do
-        if isLoosePlank(m) then
+        if isLoosePlank(m) and not heldPlanks[m] then
             local tc = plankTreeClass(m) or "?"
             local y = plankSizeY(m) or 0
             byTree[tc] = byTree[tc] or { count = 0, sizes = {} }
@@ -199,7 +277,7 @@ local function collectMatchingPlanks()
     local list = {}
     if not pm then return list end
     for _, m in ipairs(pm:GetChildren()) do
-        if isLoosePlank(m) then
+        if isLoosePlank(m) and not heldPlanks[m] then
             local tc = plankTreeClass(m)
             local y = plankSizeY(m)
             if tc and y then
@@ -262,7 +340,7 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
-local panelW, panelH = 320, 440
+local panelW, panelH = 320, 460
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
 panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -678,7 +756,6 @@ local function closeAllDropdowns(except)
     end
 end
 
--- UPDATED: label width is wider so long labels like "Fill Blueprints Of" fit
 local function makeDropdown(text, values, default, onChange, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_DROPDOWN)
@@ -834,10 +911,17 @@ local treeLabelPara = nil
 local woodTypeDropdown = nil
 local playerDropdown = nil
 local woodOwnerDropdown = nil
+local holdCountPara = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
     print("[BPFiller] " .. tostring(text))
+end
+
+local function setHoldCount()
+    if holdCountPara then
+        pcall(function() holdCountPara:setDesc(holdCountPara, "Currently holding: " .. holdCount() .. " planks") end)
+    end
 end
 
 local function getPlayerOptions()
@@ -874,18 +958,7 @@ local function getWoodTypeOptions(discovered)
     return opts
 end
 
-local function fillOneBlueprint(bp, plankEntry, root)
-    if not bp or not bp.Parent then return false, "no bp" end
-    if not plankEntry or not plankEntry.part or not plankEntry.part.Parent then
-        return false, "no plank"
-    end
-    local center = blueprintCenter(bp)
-    if not center then return false, "no center" end
-    local goalCF = CFrame.new(center)
-    local ok = teleportObjectTo(plankEntry.part, goalCF, root)
-    return ok, ok and "ok" or "ownership timeout"
-end
-
+-- Fill = hold in blueprint (Kron-style)
 local function fillAllBlueprints()
     if autoFillRunning then
         autoFillCancel = true
@@ -895,7 +968,7 @@ local function fillAllBlueprints()
 
     local pl = collectMatchingPlanks()
     if #pl == 0 then
-        setStatus("No matching planks (wood from " .. selectedWoodOwner.Name .. ")")
+        setStatus("No matching planks (" .. selectedWoodOwner.Name .. "'s wood)")
         return
     end
 
@@ -907,7 +980,7 @@ local function fillAllBlueprints()
 
     autoFillRunning = true
     autoFillCancel = false
-    setStatus(string.format("Fill: %d bps / %d planks (%s's wood)", #bps, #pl, selectedWoodOwner.Name))
+    setStatus(string.format("Hold-filling %d bps with %d planks", #bps, #pl))
 
     task.spawn(function()
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -922,7 +995,7 @@ local function fillAllBlueprints()
             for _ = 1, #pl do
                 local e = pl[plankIdx]
                 plankIdx = (plankIdx % #pl) + 1
-                if e.part and e.part.Parent then
+                if e.part and e.part.Parent and not heldPlanks[e.model] then
                     plankEntry = e; break
                 end
             end
@@ -931,15 +1004,16 @@ local function fillAllBlueprints()
                 break
             end
 
-            setStatus(string.format("Filling %d/%d (%s)", i, #bps, bp.Name))
+            setStatus(string.format("Holding %d/%d (%s)", i, #bps, bp.Name))
 
-            local ok = fillOneBlueprint(bp, plankEntry, root)
+            local ok = holdInBlueprint(bp, plankEntry, root)
             if ok then filled += 1 else failed += 1 end
+            setHoldCount()
             task.wait(fillDelay)
         end
 
         autoFillRunning = false
-        setStatus(string.format("Done: %d filled, %d failed", filled, failed))
+        setStatus(string.format("Done: %d held, %d failed", filled, failed))
     end)
 end
 
@@ -967,19 +1041,20 @@ local function loopTick()
             for _ = 1, #pl do
                 local e = pl[plankIdx]
                 plankIdx = (plankIdx % math.max(1, #pl)) + 1
-                if e.part and e.part.Parent then
+                if e.part and e.part.Parent and not heldPlanks[e.model] then
                     plankEntry = e; break
                 end
             end
             if not plankEntry then break end
-            setStatus(string.format("Loop: filling %s", bp.Name))
-            if fillOneBlueprint(bp, plankEntry, root) then
+            setStatus(string.format("Loop: holding %s", bp.Name))
+            if holdInBlueprint(bp, plankEntry, root) then
                 filled += 1
             end
+            setHoldCount()
             task.wait(fillDelay)
         end
         loopRunning = false
-        setStatus(string.format("Loop pass: filled %d", filled))
+        setStatus(string.format("Loop pass: %d held", filled))
     end)
 end
 
@@ -1011,17 +1086,19 @@ local function startClickMode()
 
         local pl = collectMatchingPlanks()
         if #pl == 0 then
-            setStatus("No matching planks")
+            setStatus("No matching planks available")
             return
         end
         local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
         local entry = pl[1]
-        setStatus(string.format("Click fill: %s", node.Name))
+        setStatus("Click-hold: " .. node.Name)
         task.spawn(function()
-            if fillOneBlueprint(node, entry, root) then
-                setStatus("Filled " .. node.Name)
+            local ok = holdInBlueprint(node, entry, root)
+            setHoldCount()
+            if ok then
+                setStatus("Held in " .. node.Name)
             else
-                setStatus("Fill failed")
+                setStatus("Hold failed")
             end
         end)
     end)
@@ -1062,7 +1139,7 @@ local function startPickMode()
         local tc = plankTreeClass(node)
         if tc then
             selectedTreeClass = tc
-            setStatus(string.format("Picked Wood Type=%s. Filter kept wide (0-1000).", tc))
+            setStatus("Picked Wood Type=" .. tc)
             if woodTypeDropdown then
                 pcall(function() woodTypeDropdown:Set(tc) end)
             end
@@ -1078,7 +1155,7 @@ local function updateInventory()
     local byTree, total = scanPlanks()
     if inventoryPara then
         if total == 0 then
-            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks for " .. selectedWoodOwner.Name .. ")") end)
+            pcall(function() inventoryPara:setDesc(inventoryPara, "(no loose planks available)") end)
         else
             local parts = {}
             for tc, data in pairs(byTree) do
@@ -1107,6 +1184,8 @@ local function updateInventory()
     if woodOwnerDropdown then
         pcall(function() woodOwnerDropdown:SetValues(getPlayerOptions()) end)
     end
+
+    setHoldCount()
 end
 
 -- ─────────── BUILD UI ───────────
@@ -1165,32 +1244,44 @@ makeInput("Max Y Size", tostring(filterMaxY), function(t)
     local n = tonumber(t); if n then filterMaxY = n end
 end, nextOrder())
 
-makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v)
+makeSlider("Hold Delay (s)", 0.05, 0.5, fillDelay, function(v)
     fillDelay = v
 end, nextOrder())
 
-makeSection("FILL", nextOrder())
+makeSection("HOLD MODE", nextOrder())
 
-makeButton("Auto Fill All",
-    "One-shot: fill every blueprint owned by the target player using the selected wood",
-    function() fillAllBlueprints() end,
-    nextOrder())
-
-makeToggle("Loop Mode",
-    "Continuously scan and fill blueprints as new planks appear",
-    false,
-    function(state)
-        loopMode = state
-        setStatus(state and "Loop ON" or "Loop OFF")
-    end,
-    nextOrder())
-
-clickToggleHandle = makeToggle("Click Mode",
-    "Click individual blueprints to fill them one at a time",
+clickToggleHandle = makeToggle("Click to Fill (Hold)",
+    "Click a blueprint to hold a matching plank inside it",
     false,
     function(state)
         if state then startClickMode() else stopClickMode() end
-        setStatus(state and "Click mode ON" or "Click mode OFF")
+        setStatus(state and "Click-hold ON" or "Click-hold OFF")
+    end,
+    nextOrder())
+
+makeButton("Auto Fill All (Hold)",
+    "Hold a matching plank in every blueprint owned by the target player",
+    function() fillAllBlueprints() end,
+    nextOrder())
+
+makeToggle("Loop Mode (Hold)",
+    "Continuously scan and hold planks in blueprints as new planks appear",
+    false,
+    function(state)
+        loopMode = state
+        setStatus(state and "Loop-hold ON" or "Loop-hold OFF")
+    end,
+    nextOrder())
+
+holdCountPara = makeParagraph("Held Planks", "Currently holding: 0 planks", nextOrder())
+
+makeButton("Release All",
+    "Drop every plank you are currently holding",
+    function()
+        local count = holdCount()
+        stopAllHolds()
+        setHoldCount()
+        setStatus("Released " .. count .. " plank(s)")
     end,
     nextOrder())
 
@@ -1205,7 +1296,7 @@ end, nextOrder())
 
 makeSection("STATUS", nextOrder())
 
-statusPara = makeParagraph("Status", "Ready", nextOrder())
+statusPara = makeParagraph("Status", "Ready - click a blueprint or use Auto Fill", nextOrder())
 
 -- ─────────── MIN / CLOSE / RESIZE ───────────
 local minimized = false
@@ -1231,6 +1322,7 @@ minimizeBtn.MouseButton1Click:Connect(function()
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
+    stopAllHolds()
     gui:Destroy()
     _G._BPFillerGui = nil
 end)
@@ -1322,4 +1414,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] Loaded.")
+print("[BPFiller] Loaded. Click a blueprint to hold-fill it, or use Auto Fill.")
