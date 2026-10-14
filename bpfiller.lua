@@ -1,4 +1,4 @@
--- v1.0 (Kron v2 UI)
+-- v1.0 (Kron v2 UI + size sliders + gold BP mode)
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
@@ -94,9 +94,17 @@ end
 local savedSettings = tryLoadSettings() or {}
 
 -- ─────────── STATE ───────────
+local SIZE_MIN = 1
+local SIZE_MAX = 20
+
+local function clampNum(v, lo, hi)
+    return math.max(lo, math.min(hi, tonumber(v) or lo))
+end
+
 local fillDelay         = savedSettings.fillDelay or 0.15
-local filterMinY        = savedSettings.filterMinY or 0
-local filterMaxY        = savedSettings.filterMaxY or 1000
+local filterMinY        = clampNum(savedSettings.filterMinY or SIZE_MIN, SIZE_MIN, SIZE_MAX)
+local filterMaxY        = clampNum(savedSettings.filterMaxY or SIZE_MAX, SIZE_MIN, SIZE_MAX)
+local goldBPMode        = savedSettings.goldBPMode or false
 local selectedTreeClass = savedSettings.selectedTreeClass
 local selectedPlayer    = plr
 local selectedWoodOwner = plr
@@ -300,6 +308,18 @@ local function blueprintCenter(model)
     end
     if count > 0 then return sum / count end
     return nil
+end
+
+-- ─────────── SIZE FILTER ───────────
+-- Gold BP mode: hard 1..2 size range
+-- Normal mode: hard min, soft max (max + 0.9 tolerance)
+local function sizePassesFilter(y)
+    if goldBPMode then
+        return y >= 1 and y <= 2
+    end
+    if y < filterMinY then return false end
+    if y > filterMaxY + 0.9 then return false end
+    return true
 end
 
 -- ─────────── WORKING ───────────
@@ -517,8 +537,7 @@ local function collectMatchingPlanks()
             local y = plankSizeY(m)
             if tc and y then
                 local treeOK = (not selectedTreeClass) or (tc == selectedTreeClass)
-                local sizeOK = (y >= filterMinY and y <= filterMaxY)
-                if treeOK and sizeOK then
+                if treeOK and sizePassesFilter(y) then
                     local p = plankPart(m)
                     if p then
                         table.insert(list, { model = m, part = p, treeClass = tc, sizeY = y })
@@ -673,6 +692,7 @@ local TEXT_WHITE = Color3.fromRGB(240, 240, 245)
 local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 local TEXT_DIM = Color3.fromRGB(100, 100, 115)
 local WARN_RED = Color3.fromRGB(230, 120, 120)
+local GOLD = Color3.fromRGB(230, 190, 80)
 
 -- Floating toggle
 local toggleBtn = Instance.new("TextButton")
@@ -828,7 +848,6 @@ sidebarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 local sidebarPad = Instance.new("UIPadding", sidebar)
 sidebarPad.PaddingTop = UDim.new(0, 8)
 
--- Sidebar bottom-right corner fix
 local sidebarFix = Instance.new("Frame")
 sidebarFix.Size = UDim2.new(0, SIDEBAR_W, 0, 10)
 sidebarFix.Position = UDim2.new(0, 0, 1, -10)
@@ -846,7 +865,7 @@ content.BackgroundColor3 = BG_DARK
 content.BorderSizePixel = 0
 content.Parent = panel
 
--- Body (scrollable)
+-- Body
 local body = Instance.new("ScrollingFrame")
 body.Size = UDim2.new(1, -20, 1, -8)
 body.Position = UDim2.fromOffset(8, 4)
@@ -899,7 +918,6 @@ sideGrip.ZIndex = 55
 sideGrip.Parent = panel
 Instance.new("UICorner", sideGrip).CornerRadius = UDim.new(0, 4)
 
--- Drag handle for title bar
 local function makeDragHandle(frame)
     local dragging = false
     local dragStart, startPos
@@ -1277,7 +1295,8 @@ local function makeInput(text, default, onChange, order)
     return { Set = function(_, v) box.Text = tostring(v) end }
 end
 
-local function makeSlider(text, min, max, default, onChange, order)
+local function makeSlider(text, min, max, default, onChange, order, fmt)
+    fmt = fmt or "%.2f"
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, ROW_SLIDER)
     frame.BackgroundColor3 = BG_ROW
@@ -1301,7 +1320,7 @@ local function makeSlider(text, min, max, default, onChange, order)
     valLbl.Size = UDim2.fromOffset(60, 14)
     valLbl.Position = UDim2.new(1, -68, 0, 6)
     valLbl.BackgroundTransparency = 1
-    valLbl.Text = string.format("%.3f", default)
+    valLbl.Text = string.format(fmt, default)
     valLbl.TextColor3 = ACCENT
     valLbl.Font = Enum.Font.GothamBold
     valLbl.TextSize = 11
@@ -1341,7 +1360,7 @@ local function makeSlider(text, min, max, default, onChange, order)
         local val = min + (max - min) * frac
         fill.Size = UDim2.new(frac, 0, 1, 0)
         knob.Position = UDim2.new(frac, 0, 0.5, 0)
-        valLbl.Text = string.format("%.3f", val)
+        valLbl.Text = string.format(fmt, val)
         local ok, err = pcall(onChange, val)
         if not ok then warn("[BPFiller] slider error: " .. tostring(err)) end
     end
@@ -1553,6 +1572,7 @@ local woodOwnerDropdown = nil
 local baseDropdown = nil
 local holdCountPara = nil
 local crossWarnPara = nil
+local sizeRangePara = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -1572,6 +1592,22 @@ local function updateCrossWarn()
             crossWarnPara:setDesc(crossWarnPara,
                 "WARNING: Wood source is " .. selectedWoodOwner.Name .. " - grabs may fail without perms.")
             crossWarnPara:setColor(crossWarnPara, WARN_RED)
+        end)
+    end
+end
+
+local function updateSizeRangeInfo()
+    if not sizeRangePara then return end
+    if goldBPMode then
+        pcall(function()
+            sizeRangePara:setDesc(sizeRangePara, "GOLD BP MODE - accepts planks sized 1 to 2")
+            sizeRangePara:setColor(sizeRangePara, GOLD)
+        end)
+    else
+        pcall(function()
+            sizeRangePara:setDesc(sizeRangePara,
+                string.format("Accepts: %.2f to %.2f (max + 0.9 soft cap)", filterMinY, filterMaxY))
+            sizeRangePara:setColor(sizeRangePara, TEXT_GRAY)
         end)
     end
 end
@@ -1874,6 +1910,7 @@ local function collectCurrentSettings()
         fillDelay = fillDelay,
         filterMinY = filterMinY,
         filterMaxY = filterMaxY,
+        goldBPMode = goldBPMode,
         selectedTreeClass = selectedTreeClass,
         selectedPlayerName = selectedPlayer and selectedPlayer.Name or "(Me)",
         selectedWoodOwnerName = selectedWoodOwner and selectedWoodOwner.Name or "(Me)",
@@ -1888,8 +1925,9 @@ end
 
 local function resetSettings()
     fillDelay = 0.15
-    filterMinY = 0
-    filterMaxY = 1000
+    filterMinY = SIZE_MIN
+    filterMaxY = SIZE_MAX
+    goldBPMode = false
     selectedTreeClass = nil
     selectedPlayer = plr
     selectedWoodOwner = plr
@@ -1910,6 +1948,7 @@ local function resetSettings()
     if woodOwnerDropdown then pcall(function() woodOwnerDropdown:Set("(Me)") end) end
     if woodTypeDropdown then pcall(function() woodTypeDropdown:Set("(All)") end) end
     updateCrossWarn()
+    updateSizeRangeInfo()
     updateInventory()
     setStatus("Settings reset to defaults")
 end
@@ -1969,15 +2008,40 @@ pickBtnHandle = makeButton("Pick Plank",
 treeLabelPara = makeParagraph("Selected Wood Type",
     selectedTreeClass or "None (all types)", nextOrder())
 
-makeInput("Min Y Size", tostring(filterMinY), function(t)
-    local n = tonumber(t); if n then filterMinY = n end
-end, nextOrder())
+makeSection("SIZE FILTER", nextOrder())
 
-makeInput("Max Y Size", tostring(filterMaxY), function(t)
-    local n = tonumber(t); if n then filterMaxY = n end
-end, nextOrder())
+sizeRangePara = makeParagraph("Active Range",
+    goldBPMode and "GOLD BP MODE - accepts planks sized 1 to 2"
+    or string.format("Accepts: %.2f to %.2f (max + 0.9 soft cap)", filterMinY, filterMaxY),
+    nextOrder(),
+    goldBPMode and GOLD or TEXT_GRAY)
 
-makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder())
+makeSlider("Min Size", SIZE_MIN, SIZE_MAX, filterMinY, function(v)
+    filterMinY = v
+    updateSizeRangeInfo()
+end, nextOrder(), "%.2f")
+
+makeSlider("Max Size", SIZE_MIN, SIZE_MAX, filterMaxY, function(v)
+    filterMaxY = v
+    updateSizeRangeInfo()
+end, nextOrder(), "%.2f")
+
+makeToggle("Gold BP Mode",
+    "Only use planks sized 1 to 2 (overrides min/max sliders)",
+    goldBPMode,
+    function(state)
+        goldBPMode = state
+        updateSizeRangeInfo()
+        setStatus(state and "Gold BP Mode ON (planks 1-2)" or "Gold BP Mode OFF")
+    end,
+    nextOrder())
+
+makeParagraph("Size Notes",
+    "Min is a hard stop. Max allows +0.9 tolerance. Gold Mode uses a fixed 1-2 range.",
+    nextOrder(),
+    TEXT_DIM)
+
+makeSlider("Fill Delay (s)", 0.05, 0.5, fillDelay, function(v) fillDelay = v end, nextOrder(), "%.2f")
 
 -- ═══ FILL TAB ═══
 makeSection("FILL METHOD", nextOrder(), "fill")
@@ -2053,7 +2117,7 @@ end, nextOrder())
 makeSlider("Fire Interval (s)", 0.1, 1.0, HOLD_FIRE_INTERVAL, function(v)
     HOLD_FIRE_INTERVAL = v
     setStatus(string.format("Fire rate: %.3fs", v))
-end, nextOrder())
+end, nextOrder(), "%.2f")
 
 makeToggle("Fire Every Frame",
     "Max hold strength (fires ClientIsDragging every render frame)",
@@ -2084,7 +2148,7 @@ makeSlider("Fly Speed", 20, 200, flySpeed, function(v)
     if flyBV and flyBV.Velocity.Magnitude > 0 then
         flyBV.Velocity = flyBV.Velocity.Unit * flySpeed
     end
-end, nextOrder())
+end, nextOrder(), "%.0f")
 
 makeButton("TP to Closest BP",
     "Teleport to the nearest blueprint owned by the selected player",
@@ -2405,7 +2469,7 @@ task.spawn(function()
     end
 end)
 
-print("[BPFiller] v" .. VERSION .. " (Kron v2 UI) loaded.")
+print("[BPFiller] v" .. VERSION .. " loaded.")
 print("[BPFiller] Mode: " .. fillMethod .. "  |  Owner access: " .. tostring(IS_OWNER))
 if savedSettings and next(savedSettings) then
     print("[BPFiller] Loaded saved settings.")
