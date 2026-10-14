@@ -1,8 +1,12 @@
--- v1.0 (Kron v2 UI + size sliders + gold BP mode)
+-- v1.0 (Kron v2 UI + size filter toggle + fill lasso tab)
 if _G._BPFillerGui and _G._BPFillerGui.Parent then
     pcall(function() _G._BPFillerGui:Destroy() end)
 end
 if _G._BPFillerGui then _G._BPFillerGui = nil end
+if _G._BPFLassoGui and _G._BPFLassoGui.Parent then
+    pcall(function() _G._BPFLassoGui:Destroy() end)
+end
+if _G._BPFLassoGui then _G._BPFLassoGui = nil end
 
 local VERSION = "1.0"
 
@@ -12,6 +16,7 @@ local UIS = game:GetService("UserInputService")
 local RS2 = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local GuiService = game:GetService("GuiService")
 
 local plr = Players.LocalPlayer
 local Mouse = plr:GetMouse()
@@ -104,6 +109,7 @@ end
 local fillDelay         = savedSettings.fillDelay or 0.15
 local filterMinY        = clampNum(savedSettings.filterMinY or SIZE_MIN, SIZE_MIN, SIZE_MAX)
 local filterMaxY        = clampNum(savedSettings.filterMaxY or SIZE_MAX, SIZE_MIN, SIZE_MAX)
+local sizeFilterEnabled = savedSettings.sizeFilterEnabled ~= false
 local goldBPMode        = savedSettings.goldBPMode or false
 local selectedTreeClass = savedSettings.selectedTreeClass
 local selectedPlayer    = plr
@@ -118,6 +124,13 @@ local HOLD_FIRE_INTERVAL = savedSettings.holdFireInterval or 0.5
 local fireEveryFrame     = savedSettings.fireEveryFrame or false
 local fireOnceOnly       = savedSettings.fireOnceOnly or false
 local fireSignature      = savedSettings.fireSignature or 1
+
+-- Lasso state
+local lassoFillOnly = savedSettings.lassoFillOnly or false
+local lassoSelectedBlueprints = {}
+local lassoMode = false
+local lassoDragging = false
+local lassoStart = nil
 
 local function resolvePlayer(name)
     if not name or name == "" or name == "(Me)" then return plr end
@@ -311,9 +324,8 @@ local function blueprintCenter(model)
 end
 
 -- ─────────── SIZE FILTER ───────────
--- Gold BP mode: hard 1..2 size range
--- Normal mode: hard min, soft max (max + 0.9 tolerance)
 local function sizePassesFilter(y)
+    if not sizeFilterEnabled then return true end
     if goldBPMode then
         return y >= 1 and y <= 2
     end
@@ -549,13 +561,28 @@ local function collectMatchingPlanks()
     return list
 end
 
+local function lassoSelectedCount()
+    local n = 0
+    for _ in pairs(lassoSelectedBlueprints) do n += 1 end
+    return n
+end
+
 local function collectBlueprints()
     local pm = getPlayerModels()
     local list = {}
     if not pm then return list end
+
+    local useLasso = lassoFillOnly and lassoSelectedCount() > 0
+
     for _, m in ipairs(pm:GetChildren()) do
         if isBlueprint(m) then
-            table.insert(list, m)
+            if useLasso then
+                if lassoSelectedBlueprints[m] then
+                    table.insert(list, m)
+                end
+            else
+                table.insert(list, m)
+            end
         end
     end
     return list
@@ -672,6 +699,42 @@ local function tpToBase()
     if _setStatusRef then _setStatusRef("TP'd to " .. name .. "'s base") end
 end
 
+-- ─────────── LASSO GUI (separate ScreenGui for IgnoreGuiInset) ───────────
+local lassoGui = Instance.new("ScreenGui")
+lassoGui.Name = "BPFillerLasso"
+lassoGui.ResetOnSpawn = false
+lassoGui.IgnoreGuiInset = true
+lassoGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+lassoGui.DisplayOrder = 200
+lassoGui.Parent = plr:WaitForChild("PlayerGui")
+_G._BPFLassoGui = lassoGui
+
+local lassoRect = Instance.new("Frame")
+lassoRect.BackgroundColor3 = Color3.fromRGB(120, 80, 255)
+lassoRect.BackgroundTransparency = 0.75
+lassoRect.BorderSizePixel = 0
+lassoRect.ZIndex = 201
+lassoRect.Visible = false
+lassoRect.Parent = lassoGui
+Instance.new("UICorner", lassoRect).CornerRadius = UDim.new(0, 3)
+local lrStroke = Instance.new("UIStroke", lassoRect)
+lrStroke.Color = Color3.fromRGB(120, 80, 255)
+lrStroke.Thickness = 2
+
+local lassoHint = Instance.new("TextLabel")
+lassoHint.Size = UDim2.new(1, 0, 0, 28)
+lassoHint.Position = UDim2.new(0, 0, 1, -50)
+lassoHint.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+lassoHint.BackgroundTransparency = 0.15
+lassoHint.Text = "Drag on screen to draw lasso     |     Click 'Draw Lasso' again to cancel"
+lassoHint.TextColor3 = Color3.fromRGB(240, 240, 245)
+lassoHint.Font = Enum.Font.GothamMedium
+lassoHint.TextSize = 12
+lassoHint.ZIndex = 202
+lassoHint.Visible = false
+lassoHint.Parent = lassoGui
+Instance.new("UICorner", lassoHint).CornerRadius = UDim.new(0, 6)
+
 -- ─────────── UI: KRON V2 LAYOUT ───────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "BPFillerStandalone"
@@ -693,8 +756,8 @@ local TEXT_GRAY = Color3.fromRGB(150, 150, 165)
 local TEXT_DIM = Color3.fromRGB(100, 100, 115)
 local WARN_RED = Color3.fromRGB(230, 120, 120)
 local GOLD = Color3.fromRGB(230, 190, 80)
+local GOOD_GREEN = Color3.fromRGB(110, 210, 130)
 
--- Floating toggle
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleBtn"
 toggleBtn.Size = UDim2.fromOffset(40, 40)
@@ -712,7 +775,6 @@ local toggleStroke = Instance.new("UIStroke", toggleBtn)
 toggleStroke.Color = ACCENT
 toggleStroke.Thickness = 2
 
--- Fly buttons
 flyUpBtn = Instance.new("TextButton")
 flyUpBtn.Size = UDim2.fromOffset(50, 50)
 flyUpBtn.Position = UDim2.new(1, -70, 1, -130)
@@ -758,7 +820,6 @@ for _, btn in ipairs({flyUpBtn, flyDownBtn}) do
     end)
 end
 
--- Main panel
 local panelW, panelH = 360, 600
 local panel = Instance.new("Frame")
 panel.Name = "MainPanel"
@@ -776,7 +837,6 @@ local pStroke = Instance.new("UIStroke", panel)
 pStroke.Color = ACCENT_SOFT
 pStroke.Thickness = 1.5
 
--- Title bar
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 36)
@@ -831,7 +891,6 @@ closeBtn.TextSize = 12
 closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
--- Sidebar
 local SIDEBAR_W = 46
 local sidebar = Instance.new("Frame")
 sidebar.Name = "Sidebar"
@@ -856,7 +915,6 @@ sidebarFix.BorderSizePixel = 0
 sidebarFix.ZIndex = 0
 sidebarFix.Parent = panel
 
--- Content container
 local content = Instance.new("Frame")
 content.Name = "Content"
 content.Size = UDim2.new(1, -SIDEBAR_W, 1, -36)
@@ -865,7 +923,6 @@ content.BackgroundColor3 = BG_DARK
 content.BorderSizePixel = 0
 content.Parent = panel
 
--- Body
 local body = Instance.new("ScrollingFrame")
 body.Size = UDim2.new(1, -20, 1, -8)
 body.Position = UDim2.fromOffset(8, 4)
@@ -885,7 +942,6 @@ local bodyPad = Instance.new("UIPadding", body)
 bodyPad.PaddingTop = UDim.new(0, 6)
 bodyPad.PaddingBottom = UDim.new(0, 12)
 
--- Resize handle
 local resizeHandle = Instance.new("TextButton")
 resizeHandle.Size = UDim2.fromOffset(16, 16)
 resizeHandle.Position = UDim2.new(1, -20, 1, -20)
@@ -905,7 +961,6 @@ for i = 1, 3 do
     line.Parent = resizeHandle
 end
 
--- Side grip
 local sideGrip = Instance.new("TextButton")
 sideGrip.Name = "SideGrip"
 sideGrip.Size = UDim2.new(0, 10, 1, -46)
@@ -961,12 +1016,13 @@ local TAB_DEFS = {
     { key = "target", icon = "◎", label = "Target", order = 1 },
     { key = "planks", icon = "❖", label = "Planks", order = 2 },
     { key = "fill",   icon = "▶", label = "Fill",   order = 3 },
-    { key = "nav",    icon = "✦", label = "Nav",    order = 4 },
-    { key = "config", icon = "⚙", label = "Config", order = 5 },
-    { key = "log",    icon = "☰", label = "Log",    order = 6 },
+    { key = "lasso",  icon = "⬚", label = "Lasso",  order = 4 },
+    { key = "nav",    icon = "✦", label = "Nav",    order = 5 },
+    { key = "config", icon = "⚙", label = "Config", order = 6 },
+    { key = "log",    icon = "☰", label = "Log",    order = 7 },
 }
 if IS_OWNER then
-    table.insert(TAB_DEFS, { key = "debug", icon = "⚒", label = "Debug", order = 7 })
+    table.insert(TAB_DEFS, { key = "debug", icon = "⚒", label = "Debug", order = 8 })
 end
 
 local function setActiveTab(key, silent)
@@ -1250,51 +1306,6 @@ local function makeToggle(text, desc, default, onChange, order)
     return { Set = function(_, v) setState(v) end }
 end
 
-local function makeInput(text, default, onChange, order)
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, ROW_INPUT)
-    frame.BackgroundColor3 = BG_ROW
-    frame.BorderSizePixel = 0
-    frame.LayoutOrder = order
-    frame.Parent = body
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
-
-    local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(90, ROW_INPUT)
-    t.Position = UDim2.fromOffset(8, 0)
-    t.BackgroundTransparency = 1
-    t.Text = text
-    t.TextColor3 = TEXT_WHITE
-    t.Font = Enum.Font.GothamMedium
-    t.TextSize = 11
-    t.TextXAlignment = Enum.TextXAlignment.Left
-    t.Parent = frame
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, -112, 0, 28)
-    box.Position = UDim2.new(0, 104, 0.5, -14)
-    box.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-    box.BorderSizePixel = 0
-    box.Text = tostring(default)
-    box.TextColor3 = TEXT_WHITE
-    box.Font = Enum.Font.GothamMedium
-    box.TextSize = 12
-    box.ClearTextOnFocus = false
-    box.TextXAlignment = Enum.TextXAlignment.Left
-    box.Parent = frame
-    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 5)
-    local bs = Instance.new("UIStroke", box)
-    bs.Color = Color3.fromRGB(50, 50, 65)
-    bs.Thickness = 1
-    box.Focused:Connect(function() bs.Color = ACCENT end)
-    box.FocusLost:Connect(function()
-        bs.Color = Color3.fromRGB(50, 50, 65)
-        local ok, err = pcall(onChange, box.Text)
-        if not ok then warn("[BPFiller] input error: " .. tostring(err)) end
-    end)
-    return { Set = function(_, v) box.Text = tostring(v) end }
-end
-
 local function makeSlider(text, min, max, default, onChange, order, fmt)
     fmt = fmt or "%.2f"
     local frame = Instance.new("Frame")
@@ -1573,6 +1584,9 @@ local baseDropdown = nil
 local holdCountPara = nil
 local crossWarnPara = nil
 local sizeRangePara = nil
+local lassoCountPara = nil
+local lassoOnlyToggle = nil
+local lassoDrawBtn = nil
 
 local function setStatus(text)
     if statusPara then pcall(function() statusPara:setDesc(statusPara, text) end) end
@@ -1598,7 +1612,12 @@ end
 
 local function updateSizeRangeInfo()
     if not sizeRangePara then return end
-    if goldBPMode then
+    if not sizeFilterEnabled then
+        pcall(function()
+            sizeRangePara:setDesc(sizeRangePara, "Size filter: DISABLED (all sizes accepted)")
+            sizeRangePara:setColor(sizeRangePara, GOOD_GREEN)
+        end)
+    elseif goldBPMode then
         pcall(function()
             sizeRangePara:setDesc(sizeRangePara, "GOLD BP MODE - accepts planks sized 1 to 2")
             sizeRangePara:setColor(sizeRangePara, GOLD)
@@ -1608,6 +1627,21 @@ local function updateSizeRangeInfo()
             sizeRangePara:setDesc(sizeRangePara,
                 string.format("Accepts: %.2f to %.2f (max + 0.9 soft cap)", filterMinY, filterMaxY))
             sizeRangePara:setColor(sizeRangePara, TEXT_GRAY)
+        end)
+    end
+end
+
+local function updateLassoCount()
+    local n = lassoSelectedCount()
+    if lassoCountPara then
+        pcall(function()
+            if n == 0 then
+                lassoCountPara:setDesc(lassoCountPara, "None selected")
+                lassoCountPara:setColor(lassoCountPara, TEXT_GRAY)
+            else
+                lassoCountPara:setDesc(lassoCountPara, n .. " blueprint(s) selected")
+                lassoCountPara:setColor(lassoCountPara, GOOD_GREEN)
+            end
         end)
     end
 end
@@ -1905,11 +1939,122 @@ local function updateInventory()
     setHoldCount()
 end
 
+-- ─────────── LASSO LOGIC ───────────
+local function cancelLasso()
+    lassoMode = false
+    lassoDragging = false
+    lassoRect.Visible = false
+    lassoHint.Visible = false
+    if lassoDrawBtn then
+        pcall(function()
+            lassoDrawBtn.Text = "Draw Lasso"
+        end)
+    end
+end
+
+local function startLassoMode()
+    lassoMode = true
+    lassoDragging = false
+    lassoRect.Visible = false
+    lassoHint.Visible = true
+    if lassoDrawBtn then
+        pcall(function()
+            lassoDrawBtn.Text = "Cancel Lasso"
+        end)
+    end
+    setStatus("Lasso mode ON - drag on screen to select")
+end
+
+local function applyLassoSelection(x1, y1, x2, y2)
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    local newSet = {}
+    local bps = collectBlueprints()
+    local count = 0
+    for _, bp in ipairs(bps) do
+        local c = blueprintCenter(bp)
+        if c then
+            local screenPos, onScreen = camera:WorldToViewportPoint(c)
+            if onScreen then
+                local sx = screenPos.X
+                local sy = screenPos.Y
+                if sx >= x1 and sx <= x2 and sy >= y1 and sy <= y2 then
+                    newSet[bp] = true
+                    count += 1
+                end
+            end
+        end
+    end
+
+    lassoSelectedBlueprints = newSet
+    updateLassoCount()
+
+    if count > 0 then
+        lassoFillOnly = true
+        if lassoOnlyToggle then lassoOnlyToggle:Set(true) end
+        setStatus(string.format("Lasso: %d blueprints selected (Fill Only Lasso auto-enabled)", count))
+    else
+        setStatus("Lasso: no blueprints inside selection")
+    end
+end
+
+-- Lasso input handlers
+UIS.InputBegan:Connect(function(input, gp)
+    if not lassoMode then return end
+    if gp then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        lassoDragging = true
+        lassoStart = input.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if not lassoDragging then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+    and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+    local pos = input.Position
+    local x1 = math.min(lassoStart.X, pos.X)
+    local y1 = math.min(lassoStart.Y, pos.Y)
+    local x2 = math.max(lassoStart.X, pos.X)
+    local y2 = math.max(lassoStart.Y, pos.Y)
+
+    lassoRect.Position = UDim2.fromOffset(x1, y1)
+    lassoRect.Size = UDim2.fromOffset(x2 - x1, y2 - y1)
+    lassoRect.Visible = true
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if not lassoDragging then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1
+    and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+    lassoDragging = false
+    lassoRect.Visible = false
+
+    local pos = input.Position
+    local x1 = math.min(lassoStart.X, pos.X)
+    local y1 = math.min(lassoStart.Y, pos.Y)
+    local x2 = math.max(lassoStart.X, pos.X)
+    local y2 = math.max(lassoStart.Y, pos.Y)
+
+    if (x2 - x1) < 5 and (y2 - y1) < 5 then
+        setStatus("Lasso too small - try again")
+        return
+    end
+
+    applyLassoSelection(x1, y1, x2, y2)
+    cancelLasso()
+end)
+
 local function collectCurrentSettings()
     return {
         fillDelay = fillDelay,
         filterMinY = filterMinY,
         filterMaxY = filterMaxY,
+        sizeFilterEnabled = sizeFilterEnabled,
         goldBPMode = goldBPMode,
         selectedTreeClass = selectedTreeClass,
         selectedPlayerName = selectedPlayer and selectedPlayer.Name or "(Me)",
@@ -1920,6 +2065,7 @@ local function collectCurrentSettings()
         fireEveryFrame = fireEveryFrame,
         fireOnceOnly = fireOnceOnly,
         fireSignature = fireSignature,
+        lassoFillOnly = lassoFillOnly,
     }
 end
 
@@ -1927,6 +2073,7 @@ local function resetSettings()
     fillDelay = 0.15
     filterMinY = SIZE_MIN
     filterMaxY = SIZE_MAX
+    sizeFilterEnabled = true
     goldBPMode = false
     selectedTreeClass = nil
     selectedPlayer = plr
@@ -1937,6 +2084,8 @@ local function resetSettings()
     fireEveryFrame = false
     fireOnceOnly = false
     fireSignature = 1
+    lassoFillOnly = false
+    lassoSelectedBlueprints = {}
 
     if writefile and isfile then
         pcall(function()
@@ -1947,13 +2096,15 @@ local function resetSettings()
     if playerDropdown then pcall(function() playerDropdown:Set("(Me)") end) end
     if woodOwnerDropdown then pcall(function() woodOwnerDropdown:Set("(Me)") end) end
     if woodTypeDropdown then pcall(function() woodTypeDropdown:Set("(All)") end) end
+    if lassoOnlyToggle then pcall(function() lassoOnlyToggle:Set(false) end) end
     updateCrossWarn()
     updateSizeRangeInfo()
+    updateLassoCount()
     updateInventory()
     setStatus("Settings reset to defaults")
 end
 
--- ─────────── BUILD CONTENT (ordered to match tabs) ───────────
+-- ─────────── BUILD CONTENT ───────────
 local order = 0
 local function nextOrder() order += 1; return order end
 
@@ -2011,10 +2162,11 @@ treeLabelPara = makeParagraph("Selected Wood Type",
 makeSection("SIZE FILTER", nextOrder())
 
 sizeRangePara = makeParagraph("Active Range",
-    goldBPMode and "GOLD BP MODE - accepts planks sized 1 to 2"
-    or string.format("Accepts: %.2f to %.2f (max + 0.9 soft cap)", filterMinY, filterMaxY),
+    (not sizeFilterEnabled) and "Size filter: DISABLED (all sizes accepted)"
+    or (goldBPMode and "GOLD BP MODE - accepts planks sized 1 to 2"
+        or string.format("Accepts: %.2f to %.2f (max + 0.9 soft cap)", filterMinY, filterMaxY)),
     nextOrder(),
-    goldBPMode and GOLD or TEXT_GRAY)
+    (not sizeFilterEnabled) and GOOD_GREEN or (goldBPMode and GOLD or TEXT_GRAY))
 
 makeSlider("Min Size", SIZE_MIN, SIZE_MAX, filterMinY, function(v)
     filterMinY = v
@@ -2026,8 +2178,18 @@ makeSlider("Max Size", SIZE_MIN, SIZE_MAX, filterMaxY, function(v)
     updateSizeRangeInfo()
 end, nextOrder(), "%.2f")
 
+makeToggle("Enable Size Filter",
+    "Turn OFF to accept any plank size (ignores min/max and gold mode)",
+    sizeFilterEnabled,
+    function(state)
+        sizeFilterEnabled = state
+        updateSizeRangeInfo()
+        setStatus(state and "Size filter ENABLED" or "Size filter DISABLED (all sizes)")
+    end,
+    nextOrder())
+
 makeToggle("Gold BP Mode",
-    "Only use planks sized 1 to 2 (overrides min/max sliders)",
+    "Only use planks sized 1 to 2 (requires size filter ON)",
     goldBPMode,
     function(state)
         goldBPMode = state
@@ -2132,6 +2294,53 @@ makeToggle("Fire Once Only",
         fireOnceOnly = state
         setStatus(state and "Fire-once mode ON" or "Fire-once mode OFF")
     end, nextOrder())
+
+-- ═══ LASSO TAB ═══
+makeSection("FILL LASSO", nextOrder(), "lasso")
+
+makeParagraph("How it works",
+    "Click 'Draw Lasso' then drag a rectangle on screen. Blueprints inside the rectangle get selected.",
+    nextOrder(),
+    TEXT_DIM)
+
+lassoDrawBtn = makeButton("Draw Lasso",
+    "Enter lasso mode - drag on screen to select blueprints",
+    function()
+        if lassoMode then
+            cancelLasso()
+            setStatus("Lasso cancelled")
+        else
+            startLassoMode()
+        end
+    end, nextOrder())
+
+lassoCountPara = makeParagraph("Selected Blueprints",
+    lassoSelectedCount() == 0 and "None selected"
+    or (lassoSelectedCount() .. " blueprint(s) selected"),
+    nextOrder(),
+    lassoSelectedCount() == 0 and TEXT_GRAY or GOOD_GREEN)
+
+lassoOnlyToggle = makeToggle("Fill Only Lasso",
+    "When ON, only blueprints inside the lasso get filled",
+    lassoFillOnly, function(state)
+        lassoFillOnly = state
+        setStatus(state and "Fill Only Lasso ON" or "Fill Only Lasso OFF")
+    end, nextOrder())
+
+makeButton("Clear Lasso",
+    "Forget the current lasso selection and turn off Fill Only Lasso",
+    function()
+        lassoSelectedBlueprints = {}
+        lassoFillOnly = false
+        if lassoOnlyToggle then lassoOnlyToggle:Set(false) end
+        updateLassoCount()
+        setStatus("Lasso cleared")
+    end, nextOrder())
+
+makeParagraph("Plot expansion tip",
+    "To fill only one plot expansion, draw the lasso around that expansion's blueprints. Only those get filled.",
+    nextOrder(),
+    TEXT_DIM)
 
 -- ═══ NAV TAB ═══
 makeSection("NAVIGATION", nextOrder(), "nav")
@@ -2313,15 +2522,12 @@ end, nextOrder())
 makeSection("STATUS", nextOrder())
 statusPara = makeParagraph("Status", "Ready - mode: " .. fillMethod, nextOrder())
 
--- Create tab buttons
 for _, def in ipairs(TAB_DEFS) do
     makeTabButton(def)
 end
 
--- Set initial active tab
 setActiveTab("target")
 
--- Update active tab based on scroll position
 local lastScrollCheck = 0
 RunService.Heartbeat:Connect(function()
     if not gui.Parent then return end
@@ -2374,8 +2580,11 @@ end)
 closeBtn.MouseButton1Click:Connect(function()
     stopAllHolds()
     stopFly()
+    cancelLasso()
+    if lassoGui then pcall(function() lassoGui:Destroy() end); lassoGui = nil end
     gui:Destroy()
     _G._BPFillerGui = nil
+    _G._BPFLassoGui = nil
 end)
 
 local resizing = false
